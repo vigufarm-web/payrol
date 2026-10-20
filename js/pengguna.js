@@ -145,7 +145,15 @@ const HALAMAN_INPUT = new Set(['hk', 'borongan', 'lembur', 'impor', 'log', 'sola
 export function bolehHalaman(kunci) {
   if (!adaPengguna()) return true;
   const p = siapa();
-  if (!p) return kunci === 'sistem';
+  // Belum pilih nama tapi PIN admin sudah dibuka di sesi ini: halaman yang
+  // memang digembok PIN tetap boleh — penting saat pemilik baru menyusun
+  // daftar pengguna pertama kali (dirinya belum ada di daftar).
+  if (!p) {
+    return kunci === 'sistem'
+      || (kunci === 'pengguna' && sessionStorage.getItem('app.pengguna.buka') === '1')
+      || (kunci === 'target' && sessionStorage.getItem('app.target.buka') === '1')
+      || (kunci === 'tarifpremi' && sessionStorage.getItem('app.tarif.buka') === '1');
+  }
   if (p.admin) return true;
   if (kunci === 'kebun' || kunci === 'monitor') return bolehLaporan();
   if (kunci === 'beranda') return bolehSetuju() || bolehLaporan();
@@ -153,6 +161,17 @@ export function bolehHalaman(kunci) {
   if (kunci === 'target' || kunci === 'pengguna' || kunci === 'tarifpremi') return false;  // admin saja
   if (HALAMAN_INPUT.has(kunci)) return bolehInput() || bolehRevisi();
   return true;
+}
+
+/** Boleh mengelola halaman yang digembok PIN admin (pengguna/target/tarif)?
+ *  Admin yang masuk jelas boleh. Belum ada yang masuk tapi PIN admin sudah
+ *  dibuka di sesi ini juga boleh — PIN itulah gemboknya; penting saat pemilik
+ *  pertama kali menyusun daftar pengguna (dirinya belum ada di daftar). */
+export function bolehKelolaTerkunci(flag) {
+  if (!adaPengguna()) return true;
+  const p = siapa();
+  if (p) return p.admin === true;
+  return sessionStorage.getItem(flag) === '1';
 }
 
 /** Master data umumnya hanya admin; master Blok boleh juga dipegang
@@ -272,7 +291,9 @@ export async function pilihPengguna({ wajib = true } = {}) {
 // ------------------------------------------------------ halaman pengaturan
 export function halamanPengguna({ gambar, bisaEdit }) {
   const wadah = el('section');
-  let terbuka = false;
+  // sekali PIN admin dibuka, tetap terbuka selama tab masih hidup — supaya
+  // gambar ulang penuh (yang memunculkan tombol Simpan) tidak minta PIN lagi
+  let terbuka = sessionStorage.getItem('app.pengguna.buka') === '1';
 
   const gambarIsi = () => {
     kosongkan(wadah);
@@ -294,7 +315,7 @@ export function halamanPengguna({ gambar, bisaEdit }) {
             onclick: async () => {
               const ok = await mintaPin('PIN admin',
                 'PIN ini melindungi daftar pengguna dan hak aksesnya.', periksaPinAdmin);
-              if (ok) { terbuka = true; gambarIsi(); }
+              if (ok) { terbuka = true; sessionStorage.setItem('app.pengguna.buka', '1'); gambarIsi(); }
             },
           }),
         ]),
@@ -347,7 +368,7 @@ export function halamanPengguna({ gambar, bisaEdit }) {
       el('div.lembar-kepala', {}, [
         el('h2', { teks: 'Daftar pengguna' }),
         bisaEdit() && diInduk ? el('button.tombol-utama.tombol-kecil', {
-          type: 'button', teks: 'Tambah pengguna', onclick: () => formPengguna(null, gambarIsi),
+          type: 'button', teks: 'Tambah pengguna', onclick: () => formPengguna(null, gambar),
         }) : null,
       ]),
       el('div.lembar-isi', {}, [
@@ -361,7 +382,7 @@ export function halamanPengguna({ gambar, bisaEdit }) {
           { l: 'Status', k: 'status' },
         ], baris, {
           kosong: 'Belum ada pengguna. Tanpa daftar ini, pembatasan tidak berlaku.',
-          saatKlik: bisaEdit() && diInduk ? (r) => formPengguna(r.id, gambarIsi) : null,
+          saatKlik: bisaEdit() && diInduk ? (r) => formPengguna(r.id, gambar) : null,
         }),
       ]),
     ]));
@@ -455,6 +476,13 @@ async function formPengguna(id, saatSelesai) {
       salah.push('Ceklis minimal satu bagian/divisi, atau jadikan admin.');
     }
     if (!ada && !inPin.value) salah.push('PIN harus diisi untuk pengguna baru.');
+    // jangan sampai terkunci: daftar harus selalu punya minimal satu admin aktif
+    const adaAdminLain = Object.entries(D.web().pengguna || {})
+      .some(([k, u]) => k !== id && u.admin && u.aktif !== false);
+    if (!adaAdminLain && !(inAdmin.checked && inAktif.checked)) {
+      salah.push('Harus ada minimal satu akun Admin yang aktif. Buat akun Anda sendiri '
+        + 'dengan centang "Admin" lebih dulu, baru tambahkan admin-admin divisi.');
+    }
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); return; }
 
@@ -478,6 +506,12 @@ async function formPengguna(id, saatSelesai) {
   };
 
   const hapusOrang = async () => {
+    const sisa = Object.entries(D.web().pengguna || {}).filter(([k]) => k !== id);
+    if (sisa.length && !sisa.some(([, u]) => u.admin && u.aktif !== false)) {
+      kosongkan(tempatGalat).append(kesalahan([
+        'Tidak bisa dihapus: dia admin aktif terakhir. Jadikan orang lain admin dulu.']));
+      return;
+    }
     const lanjut = await tanya(`Hapus pengguna ${ada.nama}?`,
       'Baris yang pernah dia buat tidak ikut terhapus — namanya tetap tercatat di sana.',
       { ya: 'Hapus', bahaya: true });

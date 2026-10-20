@@ -529,7 +529,13 @@ export function gambar() {
   gambarKepala(h.l, h.periode ? `${h.sub} — ${periode.judul()}` : h.sub, !!h.periode);
   kosongkan(elIsi);
   if (D.modeLokal()) elIsi.append(spandukLokal());
-  elIsi.append(h.buat(konteks));
+  // halaman bergembok PIN admin: hak ubahnya mengikuti gembok itu,
+  // bukan hak input/revisi transaksi
+  const FLAG_PIN = { pengguna: 'app.pengguna.buka', target: 'app.target.buka', tarifpremi: 'app.tarif.buka' };
+  const konteksHal = FLAG_PIN[kunci]
+    ? { ...konteks, bisaEdit: () => bisaEdit() && P.bolehKelolaTerkunci(FLAG_PIN[kunci]) }
+    : konteks;
+  elIsi.append(h.buat(konteksHal));
   tandaiMenuAktif();
   window.scrollTo(0, 0);
 }

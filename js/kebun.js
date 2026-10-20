@@ -486,7 +486,9 @@ export function halamanLaporanKebun({ periode, gambar, hak }) {
 // =====================================================================
 export function halamanPengaturanKebun({ periode, gambar, bisaEdit }) {
   const wadah = el('section');
-  let terbuka = false;
+  // sekali dibuka, tetap terbuka selama tab hidup — supaya gambar ulang penuh
+  // (yang memunculkan tombol Simpan di kepala halaman) tidak minta PIN lagi
+  let terbuka = sessionStorage.getItem('app.target.buka') === '1';
 
   const gambarIsi = () => {
     kosongkan(wadah);
@@ -512,10 +514,10 @@ export function halamanPengaturanKebun({ periode, gambar, bisaEdit }) {
             type: 'button',
             teks: adminPinTerpasang() ? 'Masukkan PIN admin' : 'Buka & pasang PIN admin',
             onclick: async () => {
-              if (!adminPinTerpasang()) { terbuka = true; gambarIsi(); return; }
+              if (!adminPinTerpasang()) { terbuka = true; sessionStorage.setItem('app.target.buka', '1'); gambarIsi(); return; }
               const ok = await mintaPin('PIN admin',
                 'PIN ini melindungi angka target biaya tiap kebun.', periksaPinAdmin);
-              if (ok) { terbuka = true; gambarIsi(); }
+              if (ok) { terbuka = true; sessionStorage.setItem('app.target.buka', '1'); gambarIsi(); }
             },
           }),
         ]),
@@ -539,7 +541,7 @@ export function halamanPengaturanKebun({ periode, gambar, bisaEdit }) {
         el('button.tombol-samar', {
           type: 'button',
           teks: adminPinTerpasang() ? 'Ganti PIN admin' : 'Pasang PIN admin',
-          onclick: () => formPin('admin', null, () => gambarIsi()),
+          onclick: () => formPin('admin', null, () => gambar()),
         }),
       ]),
     ]));
@@ -580,7 +582,7 @@ export function halamanPengaturanKebun({ periode, gambar, bisaEdit }) {
           { l: 'Target bulan (Rp)', k: 'bulan', jenis: 'uang', total: true },
         ], baris, {
           kosong: 'Belum ada divisi aktif.',
-          saatKlik: bisaEdit() ? (r) => formKebun(r.id, periode, gambarIsi) : null,
+          saatKlik: bisaEdit() ? (r) => formKebun(r.id, periode, gambar) : null,
         }),
       ]),
     ]));

@@ -732,7 +732,8 @@ export function halamanServis({ periode, gambar, bisaEdit }) {
 // =====================================================================
 export function halamanTarifPremi({ gambar, bisaEdit }) {
   const wadah = el('section');
-  let terbuka = false;
+  // sekali dibuka, tetap terbuka selama tab hidup (lihat halamanPengaturanKebun)
+  let terbuka = sessionStorage.getItem('app.tarif.buka') === '1';
 
   const gambarIsi = () => {
     kosongkan(wadah);
@@ -742,14 +743,14 @@ export function halamanTarifPremi({ gambar, bisaEdit }) {
         el('div.lembar-isi', {}, [
           el('p', { teks: adminPinTerpasang()
             ? 'Rp per HM dan Rp per KM tiap unit — dasar hitungan premi operator. Masukkan PIN admin.'
-            : 'PIN admin belum dipasang (pasang di bagian Payroll HK, menu Pengaturan Kebun). '
+            : 'PIN admin belum dipasang (pasang di bagian Payroll Operasional, menu Pengaturan Kebun). '
               + 'Halaman ini tetap bisa dibuka selama PIN belum ada.' }),
           el('button.tombol-utama', {
             type: 'button', teks: adminPinTerpasang() ? 'Masukkan PIN admin' : 'Buka',
             onclick: async () => {
-              if (!adminPinTerpasang()) { terbuka = true; gambarIsi(); return; }
+              if (!adminPinTerpasang()) { terbuka = true; sessionStorage.setItem('app.tarif.buka', '1'); gambarIsi(); return; }
               if (await mintaPin('PIN admin', 'PIN ini melindungi tarif premi unit.', periksaPinAdmin)) {
-                terbuka = true; gambarIsi();
+                terbuka = true; sessionStorage.setItem('app.tarif.buka', '1'); gambarIsi();
               }
             },
           }),
@@ -774,7 +775,7 @@ export function halamanTarifPremi({ gambar, bisaEdit }) {
           { l: 'Rp per KM', k: 'km', jenis: 'uang' },
         ], baris, {
           kosong: 'Belum ada unit aktif.',
-          saatKlik: bisaEdit() ? (r) => formTarif(r, gambarIsi) : null,
+          saatKlik: bisaEdit() ? (r) => formTarif(r, () => { gambarIsi(); gambar(); }) : null,
         }),
       ]),
     ]));
