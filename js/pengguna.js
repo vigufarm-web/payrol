@@ -25,7 +25,7 @@ export const HAK = [
 ];
 
 // ------------------------------------------------------------ penyimpanan
-// Daftar pengguna disimpan SEKALI di bagian induk (Payroll Padi + Infra) dan
+// Daftar pengguna disimpan SEKALI di bagian induk (Payroll Operasional) dan
 // dibaca bagian lain dari sana — satu admin bisa diberi cakupan lintas bagian.
 export const BAGIAN_INDUK = 'data/payroll.json';
 let pusatCache = null;   // hasil baca dari bagian induk (saat bukan induk)
@@ -305,7 +305,8 @@ export function halamanPengguna({ gambar, bisaEdit }) {
     const diInduk = D.state.path === BAGIAN_INDUK;
     if (!diInduk) {
       wadah.append(el('div.petunjuk', {}, [
-        'Daftar pengguna disimpan terpusat di bagian Payroll Padi + Infra. '
+        `Daftar pengguna disimpan terpusat di bagian ${
+          D.state.daftar?.dataset?.[BAGIAN_INDUK]?.label || 'Payroll Operasional'}. `
         + 'Untuk menambah atau mengubah, buka menu Pengguna di bagian itu.',
       ]));
     }
