@@ -43,17 +43,25 @@ const kmPakai = (r) => Math.max(0, (Number(r.km_akhir) || 0) - (Number(r.km_awal
 /** Daftar lokasi yang pernah dipakai, untuk saran pengisian. */
 const daftarLokasi = () => [...new Set(D.baris('work_logs').map((r) => r.lokasi).filter(Boolean))].sort();
 
-/** Tarif premi per unit: Rp per HM dan Rp per KM (diatur admin). */
+/** Tarif premi per unit: Rp per HM, per KM, dan per ritase (diatur admin).
+ *  Dasar hitungan mengikuti mana yang diisi — mis. dump truck bisa pakai
+ *  Rp/ritase saja dan mengosongkan Rp/KM. */
 export const tarifPremiUnit = (unitId) => {
   const t = D.web().unitPremi?.[String(unitId)] || {};
-  return { hm: Number(t.hm) || 0, km: Number(t.km) || 0 };
+  return { hm: Number(t.hm) || 0, km: Number(t.km) || 0, rit: Number(t.rit) || 0 };
 };
 
-/** Premi otomatis satu log = HM dipakai x tarif/HM + KM dipakai x tarif/KM. */
+/** Premi otomatis satu log = HM×tarif/HM + KM×tarif/KM + ritase×tarif/ritase. */
 export function premiOtomatis(unitId, log) {
   const t = tarifPremiUnit(unitId);
-  return Math.round(hmPakai(log) * t.hm + kmPakai(log) * t.km);
+  return Math.round(hmPakai(log) * t.hm + kmPakai(log) * t.km
+    + (Number(log.ritase) || 0) * t.rit);
 }
+
+/** Unit yang wajar punya ritase: kendaraan (pakai KM), kategori dump truck,
+ *  atau unit yang tarif premi ritasenya diisi. */
+const pakaiRitase = (unit) => !!unit && (pakaiKm(unit)
+  || unit.kategori === 'DUMP TRUCK' || tarifPremiUnit(unit.id).rit > 0);
 
 /** Meter terakhir yang tercatat untuk satu unit. */
 function meterTerakhir(unitId, kecualiId = null) {
@@ -176,18 +184,20 @@ function formLog(barisAda, tglAwal, saatSelesai) {
     const unit = D.cari('units', inUnit.value);
     if (!unit) { catatanPremi.textContent = ' '; return; }
     const t = tarifPremiUnit(unit.id);
-    if (!t.hm && !t.km) {
+    if (!t.hm && !t.km && !t.rit) {
       catatanPremi.textContent = 'Tarif premi unit ini belum diatur (menu Tarif Premi Unit) — premi diisi manual.';
       return;
     }
-    const log = { hm_awal: inHmAwal.value, hm_akhir: inHmAkhir.value, km_awal: inKmAwal.value, km_akhir: inKmAkhir.value };
+    const log = { hm_awal: inHmAwal.value, hm_akhir: inHmAkhir.value,
+      km_awal: inKmAwal.value, km_akhir: inKmAkhir.value, ritase: inRitase.value };
     const nilai = premiOtomatis(unit.id, log);
     const rinci = [];
     if (t.hm && hmPakai(log)) rinci.push(`${angka(hmPakai(log), 1)} HM × ${rupiahPenuh(t.hm)}`);
     if (t.km && kmPakai(log)) rinci.push(`${angka(kmPakai(log), 1)} KM × ${rupiahPenuh(t.km)}`);
+    if (t.rit && Number(log.ritase)) rinci.push(`${angka(Number(log.ritase), 1)} rit × ${rupiahPenuh(t.rit)}`);
     catatanPremi.textContent = rinci.length
       ? `Premi otomatis: ${rinci.join(' + ')} = ${rupiahPenuh(nilai)}` + (premiManual ? ' (diubah manual)' : '')
-      : 'Isi meternya dulu — premi dihitung dari HM/KM yang terpakai.';
+      : 'Isi meter/ritasenya dulu — premi dihitung dari situ.';
     if (!premiManual) inPremi.value = nilai;
   };
   const inCatatan = el('input', { type: 'text', nilai: barisAda?.catatan ?? '' });
@@ -196,6 +206,7 @@ function formLog(barisAda, tglAwal, saatSelesai) {
   const barisHm = el('div.baris-isian', {}, [isian('HM awal', inHmAwal), isian('HM akhir', inHmAkhir)]);
   const barisKm = el('div.baris-isian', {}, [isian('KM awal', inKmAwal), isian('KM akhir', inKmAkhir)]);
   const bungkusRitase = isian('Ritase', inRitase, { bantuan: 'Jumlah rit angkut (dump truck).' });
+  inRitase.addEventListener('input', () => hitungPremi());
 
   const tombolMeterHm = el('button.tombol-kecil', { type: 'button', teks: 'HM terakhir' });
   const tombolMeterKm = el('button.tombol-kecil', { type: 'button', teks: 'KM terakhir' });
@@ -216,7 +227,8 @@ function formLog(barisAda, tglAwal, saatSelesai) {
     const unit = D.cari('units', inUnit.value);
     barisHm.style.display = pakaiHm(unit) ? '' : 'none';
     barisKm.style.display = pakaiKm(unit) ? '' : 'none';
-    bungkusRitase.style.display = unit?.kategori === 'DUMP TRUCK' ? '' : 'none';
+    // ritase dipakai kendaraan angkut secara umum (DT, Triton, Carry, dll)
+    bungkusRitase.style.display = pakaiRitase(unit) ? '' : 'none';
     tombolMeterHm.style.display = pakaiHm(unit) ? '' : 'none';
     tombolMeterKm.style.display = pakaiKm(unit) ? '' : 'none';
     isiAwalOtomatis();
@@ -295,15 +307,32 @@ function formLog(barisAda, tglAwal, saatSelesai) {
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); badan.scrollTop = 0; return; }
 
-    // Peringatan (bukan penolakan): meter tidak nyambung atau mundur
+    // Peringatan (bukan penolakan): meter tidak nyambung atau mundur.
+    // Selisih MAJU pada awal = unit dipakai di luar kebun (mis. Triton dibawa
+    // keluar semalam) — selisihnya memang tidak dihitung premi, cukup dicatat.
     const acuan = meterSebelum(unit.id, inTanggal.value, barisAda?.id);
     const rincian = [];
+    const luar = [];   // keterangan pemakaian luar kebun -> masuk catatan
     if (acuan.ada) {
       if (pakaiHm(unit) && inHmAwal.value !== '' && Math.abs(hmA - acuan.hm) > 0.05) {
-        rincian.push(`HM awal ${angka(hmA, 1)} tidak sama dengan pembacaan tertinggi sebelumnya, ${angka(acuan.hm, 1)}`);
+        if (hmA > acuan.hm) {
+          rincian.push(`HM awal ${angka(hmA, 1)} melompat ${angka(hmA - acuan.hm, 1)} jam dari pembacaan `
+            + `terakhir (${angka(acuan.hm, 1)}) — kemungkinan unit dipakai di luar kebun. `
+            + 'Selisih itu TIDAK dihitung premi');
+          luar.push(`HM luar kebun ${angka(hmA - acuan.hm, 1)} (${angka(acuan.hm, 1)}→${angka(hmA, 1)})`);
+        } else {
+          rincian.push(`HM awal ${angka(hmA, 1)} LEBIH KECIL dari pembacaan tertinggi sebelumnya, ${angka(acuan.hm, 1)}`);
+        }
       }
       if (pakaiKm(unit) && inKmAwal.value !== '' && Math.abs(kmA - acuan.km) > 0.05) {
-        rincian.push(`KM awal ${angka(kmA, 1)} tidak sama dengan pembacaan tertinggi sebelumnya, ${angka(acuan.km, 1)}`);
+        if (kmA > acuan.km) {
+          rincian.push(`KM awal ${angka(kmA, 1)} melompat ${angka(kmA - acuan.km, 1)} km dari pembacaan `
+            + `terakhir (${angka(acuan.km, 1)}) — kemungkinan unit dipakai keluar kebun. `
+            + 'Selisih itu TIDAK dihitung premi');
+          luar.push(`KM luar kebun ${angka(kmA - acuan.km, 1)} (${angka(acuan.km, 1)}→${angka(kmA, 1)})`);
+        } else {
+          rincian.push(`KM awal ${angka(kmA, 1)} LEBIH KECIL dari pembacaan tertinggi sebelumnya, ${angka(acuan.km, 1)}`);
+        }
       }
       if (pakaiHm(unit) && hmB > 0 && hmB < acuan.hm - 1e-9) {
         rincian.push(`HM saat ini ${angka(hmB, 1)} LEBIH KECIL dari ${angka(acuan.hm, 1)} yang sudah `
@@ -332,9 +361,17 @@ function formLog(barisAda, tglAwal, saatSelesai) {
     if (rincian.length) {
       const lanjut = await tanya('Periksa meternya dulu', el('div', {}, [
         el('ul', {}, rincian.map((t) => el('li', { teks: t + '.' }))),
-        el('p', { teks: 'Bisa jadi tanggalnya keliru, meternya salah ketik, atau ada log yang kelewat. Tetap simpan?' }),
+        el('p', { teks: luar.length
+          ? 'Kalau memang unitnya dipakai keluar, lanjutkan — selisihnya dicatat otomatis dan tidak masuk premi. Tetap simpan?'
+          : 'Bisa jadi tanggalnya keliru, meternya salah ketik, atau ada log yang kelewat. Tetap simpan?' }),
       ]), { ya: 'Tetap simpan', tidak: 'Perbaiki dulu' });
       if (!lanjut) return;
+    }
+    // keterangan pemakaian luar kebun ikut tersimpan di catatan (sekali saja)
+    for (const ket of luar) {
+      if (!inCatatan.value.includes(ket)) {
+        inCatatan.value = inCatatan.value ? `${inCatatan.value}; ${ket}` : ket;
+      }
     }
 
     const isi = {
@@ -345,7 +382,7 @@ function formLog(barisAda, tglAwal, saatSelesai) {
       hm_akhir: pakaiHm(unit) ? hmB : 0,
       km_awal: pakaiKm(unit) ? kmA : 0,
       km_akhir: pakaiKm(unit) ? kmB : 0,
-      ritase: unit.kategori === 'DUMP TRUCK' ? (Number(inRitase.value) || 0) : 0,
+      ritase: pakaiRitase(unit) ? (Number(inRitase.value) || 0) : 0,
       kegiatan: inKegiatan.value.trim(),
       lokasi: (inLokasi.querySelector('input').value || '').trim(),
       premi: Number(inPremi.value) || 0,
@@ -761,18 +798,20 @@ export function halamanTarifPremi({ gambar, bisaEdit }) {
 
     const baris = D.aktif('units').map((u) => {
       const t = tarifPremiUnit(u.id);
-      return { id: u.id, unit: TABEL.units.label(u), kategori: u.kategori || '', hm: t.hm, km: t.km };
+      return { id: u.id, unit: TABEL.units.label(u), kategori: u.kategori || '', hm: t.hm, km: t.km, rit: t.rit };
     });
     wadah.append(el('div.lembar', {}, [
       el('div.lembar-kepala', {}, [el('h2', { teks: 'Tarif premi per unit' })]),
       el('div.lembar-isi', {}, [
         el('p.bantuan', { teks: 'Klik satu baris untuk mengisi tarifnya. Premi di form log harian '
-          + 'dihitung otomatis: HM dipakai × Rp/HM + KM dipakai × Rp/KM.' }),
+          + 'dihitung otomatis dari yang diisi: HM × Rp/HM + KM × Rp/KM + ritase × Rp/rit. '
+          + 'Mis. dump truck bisa pakai Rp per ritase saja — kosongkan Rp per KM-nya.' }),
         tabel([
           { l: 'Unit', k: 'unit' },
           { l: 'Kategori', k: 'kategori' },
           { l: 'Rp per HM', k: 'hm', jenis: 'uang' },
           { l: 'Rp per KM', k: 'km', jenis: 'uang' },
+          { l: 'Rp per ritase', k: 'rit', jenis: 'uang' },
         ], baris, {
           kosong: 'Belum ada unit aktif.',
           saatKlik: bisaEdit() ? (r) => formTarif(r, () => { gambarIsi(); gambar(); }) : null,
@@ -784,12 +823,14 @@ export function halamanTarifPremi({ gambar, bisaEdit }) {
   const formTarif = (r, saatSelesai) => {
     const inHm = el('input', { type: 'number', step: '100', min: '0', nilai: r.hm || '' });
     const inKm = el('input', { type: 'number', step: '100', min: '0', nilai: r.km || '' });
+    const inRit = el('input', { type: 'number', step: '100', min: '0', nilai: r.rit || '' });
     const pn = panel(`Tarif premi — ${r.unit}`, el('div', {}, [
       el('div.baris-isian', {}, [
         isian('Rp per HM', inHm, { bantuan: 'Untuk alat berat (dihitung dari HM terpakai).' }),
         isian('Rp per KM', inKm, { bantuan: 'Untuk kendaraan (dihitung dari KM terpakai).' }),
+        isian('Rp per ritase', inRit, { bantuan: 'Untuk dump truck (dihitung dari jumlah rit). Kalau pakai ini, Rp per KM biasanya dikosongkan.' }),
       ]),
-      el('p.bantuan', { teks: 'Kosongkan dua-duanya kalau unit ini preminya diisi manual.' }),
+      el('p.bantuan', { teks: 'Isi yang jadi dasar hitungan saja, sisanya kosongkan. Kosongkan semuanya kalau premi unit ini diisi manual.' }),
     ]), [
       el('button.tombol-samar', { type: 'button', teks: 'Batal', onclick: () => pn.tutup() }),
       el('button.tombol-utama', {
@@ -797,7 +838,8 @@ export function halamanTarifPremi({ gambar, bisaEdit }) {
         onclick: () => {
           D.setWeb((w) => {
             w.unitPremi ||= {};
-            w.unitPremi[String(r.id)] = { hm: Number(inHm.value) || 0, km: Number(inKm.value) || 0 };
+            w.unitPremi[String(r.id)] = { hm: Number(inHm.value) || 0, km: Number(inKm.value) || 0,
+              rit: Number(inRit.value) || 0 };
           });
           pn.tutup();
           pesan('Tarif premi disimpan. Jangan lupa Simpan ke GitHub.', 'sukses');

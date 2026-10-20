@@ -356,7 +356,8 @@ const JENIS = {
           hm_akhir: pakaiHm(unit) ? hmB : 0,
           km_awal: pakaiKm(unit) ? kmA : 0,
           km_akhir: pakaiKm(unit) ? kmB : 0,
-          ritase: unit.kategori === 'DUMP TRUCK' ? (angkaDari(baris.Ritase) ?? 0) : 0,
+          // ritase berlaku untuk kendaraan angkut umumnya (DT, Triton, Carry)
+          ritase: (pakaiKm(unit) || unit.kategori === 'DUMP TRUCK') ? (angkaDari(baris.Ritase) ?? 0) : 0,
           kegiatan: rapi(baris.Kegiatan),
           lokasi: rapi(baris.Lokasi),
           premi: angkaDari(baris.Premi) ?? 0,
