@@ -149,10 +149,13 @@ export function bolehHalaman(kunci) {
   // memang digembok PIN tetap boleh — penting saat pemilik baru menyusun
   // daftar pengguna pertama kali (dirinya belum ada di daftar).
   if (!p) {
-    return kunci === 'sistem'
-      || (kunci === 'pengguna' && sessionStorage.getItem('app.pengguna.buka') === '1')
-      || (kunci === 'target' && sessionStorage.getItem('app.target.buka') === '1')
-      || (kunci === 'tarifpremi' && sessionStorage.getItem('app.tarif.buka') === '1');
+    // "Lihat saja": semua halaman boleh DIBACA (pembatasan memang untuk
+    // menginput/merevisi, bukan melihat — penjaga tulis tetap menolak).
+    // Halaman bergembok PIN admin tetap butuh gemboknya dibuka di sesi ini.
+    if (kunci === 'pengguna') return sessionStorage.getItem('app.pengguna.buka') === '1';
+    if (kunci === 'target') return sessionStorage.getItem('app.target.buka') === '1';
+    if (kunci === 'tarifpremi') return sessionStorage.getItem('app.tarif.buka') === '1';
+    return true;
   }
   if (p.admin) return true;
   if (kunci === 'kebun' || kunci === 'monitor') return bolehLaporan();
