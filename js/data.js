@@ -1,0 +1,498 @@
+// data.js — isi database dipegang di memori, dibaca & disimpan ke repo GitHub.
+//
+// Satu file data = seluruh isi database satu aplikasi desktop. Situs ini
+// melayani dua bagian (Payroll HK dan Alat Berat & Kendaraan), masing-masing
+// punya filenya sendiri di repo yang sama. Hanya satu bagian terbuka pada
+// satu waktu.
+//
+// Nomor `rev` dan `sha` menjaga agar perubahan orang lain tidak tertimpa.
+
+import { bukaAmplop, kunciAmplop } from './kunci.js';
+import * as gh from './github.js';
+import { unduhTeks } from './ui.js';
+
+const KUNCI_NAMA = 'app.nama';
+const KUNCI_PATH = 'app.path';
+
+export const state = {
+  path: localStorage.getItem(KUNCI_PATH) || 'data/payroll.json',
+  aplikasi: '',      // 'PayrollHK' | 'AlatBerat' — dibaca dari isi file
+  data: null,
+  meta: null,
+  sha: '',
+  password: '',
+  belumDisimpan: false,
+  daftar: null,
+  labelTabel: {},    // diisi modul bagian aktif, dipakai labelRef()
+};
+
+export const namaPengisi = () => localStorage.getItem(KUNCI_NAMA) || '';
+export const setNamaPengisi = (n) => localStorage.setItem(KUNCI_NAMA, (n || '').trim());
+export const setPath = (p) => { state.path = p; localStorage.setItem(KUNCI_PATH, p); };
+
+/** Modul bagian aktif mendaftarkan skemanya supaya labelRef() tahu nama baris. */
+export const pakaiSkema = (TABEL) => { state.labelTabel = TABEL || {}; };
+
+const KOSONG = [];
+export function baris(tabel) {
+  const semua = state.data?.tabel;
+  if (!semua) return KOSONG;
+  if (!semua[tabel]) semua[tabel] = [];
+  return semua[tabel];
+}
+
+export const cari = (tabel, id) => baris(tabel).find((r) => Number(r.id) === Number(id)) || null;
+
+export function labelRef(tabelRef, id) {
+  const r = cari(tabelRef, id);
+  if (!r) return id == null || id === '' ? '' : `#${id} (tidak ada)`;
+  const def = state.labelTabel[tabelRef];
+  return def?.label?.(r) ?? String(id);
+}
+
+/**
+ * Apakah baris master masih boleh dipakai di transaksi baru.
+ * Payroll memakai kolom `status` ('Aktif'), Alat Berat memakai `aktif` (1/0).
+ */
+export function barisAktif(r) {
+  if (r == null) return false;
+  if ('status' in r) return (r.status ?? 'Aktif') === 'Aktif';
+  if ('aktif' in r) return Number(r.aktif) === 1;
+  return true;
+}
+
+export const aktif = (tabel) => baris(tabel).filter(barisAktif);
+
+const idBaru = (tabel) => baris(tabel).reduce((m, r) => Math.max(m, Number(r.id) || 0), 0) + 1;
+const sekarang = () => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+    + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
+
+// ------------------------------------------- pengaturan & persetujuan web
+// Disimpan di bagian `web` pada berkas data, bukan di tabel database, supaya
+// aplikasi desktop tidak perlu diubah skemanya.
+
+const WEB_KOSONG = () => ({ kebun: {}, target: {}, persetujuan: {}, adminPin: null });
+
+export function web() {
+  if (!state.data) return WEB_KOSONG();
+  if (!state.data.web) state.data.web = WEB_KOSONG();
+  const w = state.data.web;
+  w.kebun ||= {};
+  w.target ||= {};
+  w.persetujuan ||= {};
+  return w;
+}
+
+/** Ubah bagian `web` lewat fungsi, lalu tandai ada perubahan. */
+export function setWeb(ubah) {
+  const w = web();
+  ubah(w);
+  state.belumDisimpan = true;
+  return w;
+}
+
+export const catatanPersetujuan = (tabel, id) => web().persetujuan?.[tabel]?.[String(id)] || null;
+
+/**
+ * Membatalkan persetujuan yang sudah telanjur diberikan: statusnya kembali
+ * "menunggu" (jadi tidak dihitung lagi di laporan), dan tercatat siapa yang
+ * membatalkan beserta keputusan sebelumnya — tidak ada yang hilang diam-diam.
+ */
+export function batalkan(tabel, id, oleh) {
+  setWeb((w) => {
+    w.persetujuan[tabel] ||= {};
+    const c = w.persetujuan[tabel][String(id)] || {};
+    w.persetujuan[tabel][String(id)] = {
+      ...c,
+      status: 'menunggu',
+      dibatalkan: { oleh, waktu: sekarang(), sebelumnya: c.status || 'disetujui', olehSebelumnya: c.oleh || '' },
+    };
+  });
+}
+
+/** Daftar id baris satu tabel menurut status persetujuannya. */
+export function daftarStatus(tabel, status) {
+  const semua = web().persetujuan?.[tabel] || {};
+  return Object.entries(semua).filter(([, c]) => c.status === status).map(([id]) => Number(id));
+}
+
+/**
+ * Baris lembur/premi dihitung di laporan bila sudah disetujui.
+ * Baris TANPA catatan persetujuan dianggap sudah disetujui — itu data lama
+ * yang dibuat sebelum fitur ini ada, dan tidak boleh hilang dari laporan.
+ */
+export function disetujui(tabel, id) {
+  const c = catatanPersetujuan(tabel, id);
+  return !c || c.status === 'disetujui';
+}
+
+export const menungguPersetujuan = (tabel, id) => catatanPersetujuan(tabel, id)?.status === 'menunggu';
+
+/** Tandai baris baru sebagai menunggu persetujuan kepala kebun. */
+export function tandaiMenunggu(tabel, id) {
+  setWeb((w) => {
+    w.persetujuan[tabel] ||= {};
+    w.persetujuan[tabel][String(id)] = {
+      status: 'menunggu',
+      diinput: namaPengisi() || 'Web',
+      waktu: sekarang(),
+    };
+  });
+}
+
+export function setujui(tabel, id, oleh) {
+  setWeb((w) => {
+    w.persetujuan[tabel] ||= {};
+    const c = w.persetujuan[tabel][String(id)] || {};
+    w.persetujuan[tabel][String(id)] = { ...c, status: 'disetujui', oleh, waktu: sekarang() };
+  });
+}
+
+/** Ditolak = dihapus (masih bisa dipulihkan dari Data terhapus). */
+export function tolak(tabel, id, oleh) {
+  setWeb((w) => {
+    w.persetujuan[tabel] ||= {};
+    const c = w.persetujuan[tabel][String(id)] || {};
+    w.persetujuan[tabel][String(id)] = { ...c, status: 'ditolak', oleh, waktu: sekarang() };
+  });
+  hapus(tabel, id, { lunak: true, aksi: 'tolak' });
+}
+
+// ------------------------------------------------------- khusus payroll
+export const pengaturan = () => baris('app_settings')[0] || {};
+export const maksHkPerHari = () => Number(pengaturan().max_hk_per_hari) || 1.0;
+
+export function periodeTerkunci(tanggal) {
+  if (!tanggal) return false;
+  const [th, bl] = String(tanggal).split('-').map(Number);
+  return baris('payroll_lock').some(
+    (r) => Number(r.tahun) === th && Number(r.bulan) === bl && Number(r.status_lock) === 1);
+}
+
+export function totalHkHari(employeeId, tanggal, kecualiId = null) {
+  return baris('daily_payroll')
+    .filter((r) => !r.deleted_at
+      && Number(r.employee_id) === Number(employeeId)
+      && r.tanggal === tanggal
+      && Number(r.id) !== Number(kecualiId))
+    .reduce((n, r) => n + (Number(r.hk) || 0), 0);
+}
+
+/**
+ * Membagi satu angka HK ke beberapa blok.
+ *
+ * mode 'luas'  → sebanding luas tiap blok (makin luas makin besar HK-nya)
+ * mode 'rata'  → dibagi sama besar
+ *
+ * Kalau ada blok yang luasnya kosong/0, pembagian per luas tidak bisa
+ * dipakai (nanti blok itu dapat 0 HK), jadi otomatis jatuh ke 'rata' dan
+ * itu dilaporkan lewat `cara` + `tanpaLuas` supaya bisa ditampilkan.
+ *
+ * Blok terakhir menyerap sisa pembulatan supaya jumlahnya persis totalHk.
+ */
+export function bagiHkPerBlok(blokIds, totalHk, mode = 'luas') {
+  const n = blokIds.length;
+  if (!n || !(totalHk > 0)) return { bagian: [], cara: 'rata', tanpaLuas: [] };
+
+  const blok = blokIds.map((id) => cari('blocks', id));
+  const luas = blok.map((b) => Number(b?.luas) || 0);
+  const tanpaLuas = [];
+  blok.forEach((b, i) => { if (luas[i] <= 0) tanpaLuas.push(b?.nama_blok || String(blokIds[i])); });
+  const totalLuas = luas.reduce((a, b) => a + b, 0);
+  const pakaiLuas = mode !== 'rata' && !tanpaLuas.length && totalLuas > 0;
+
+  const bulat = (v) => Math.round(v * 10000) / 10000;
+  const bagian = [];
+  let sisa = totalHk;
+  for (let i = 0; i < n; i += 1) {
+    const nilai = i === n - 1
+      ? bulat(sisa)
+      : bulat(pakaiLuas ? (totalHk * luas[i]) / totalLuas : totalHk / n);
+    bagian.push(nilai);
+    sisa = bulat(sisa - nilai);
+  }
+  return { bagian, cara: pakaiLuas ? 'luas' : 'rata', tanpaLuas };
+}
+
+// ---------------------------------------------------------------- memuat
+export async function muatDaftar() {
+  try {
+    const { isi } = await gh.bacaFile('data/daftar.json');
+    state.daftar = isi;
+    return isi;
+  } catch {
+    return null;
+  }
+}
+
+/** Baca meta publik saja (tanpa password), untuk layar kunci. */
+export async function intipMeta(path = state.path) {
+  const { isi } = await gh.bacaFile(path);
+  if (!isi) return null;
+  if (path === state.path) state.meta = isi.meta || null;
+  return isi.meta || null;
+}
+
+export async function muat(password, path = state.path) {
+  const { isi, sha } = await gh.bacaFile(path);
+  if (!isi) {
+    throw new Error(`Belum ada file data di repo (${path}). `
+      + 'Kirim data dulu dari aplikasi desktop lewat menu Sinkron GitHub.');
+  }
+  const data = await bukaAmplop(isi, password);
+  if (!data.aplikasi) throw new Error('Isi file data tidak dikenali.');
+  state.path = path;
+  state.aplikasi = data.aplikasi;
+  state.data = data;
+  state.meta = isi.meta || null;
+  state.sha = sha;
+  state.password = password;
+  state.belumDisimpan = false;
+  return data;
+}
+
+export const muatUlang = () => muat(state.password, state.path);
+
+/**
+ * Membaca BAGIAN LAIN (mis. payroll.json dari bagian alat berat) hanya untuk
+ * dibaca — dipakai monitor gabungan kepala divisi Infra. Memakai password
+ * yang sama dengan bagian yang sedang terbuka; kalau passwordnya beda atau
+ * berkasnya tidak ada, mengembalikan null tanpa menggagalkan halaman.
+ */
+const simpananLain = {};
+export async function muatBagianLain(path) {
+  if (path in simpananLain) return simpananLain[path];
+  try {
+    const { isi } = await gh.bacaFile(path);
+    if (!isi) throw new Error('kosong');
+    const data = await bukaAmplop(isi, state.password);
+    simpananLain[path] = data;
+  } catch {
+    simpananLain[path] = null;
+  }
+  return simpananLain[path];
+}
+export const lupakanBagianLain = () => { for (const k of Object.keys(simpananLain)) delete simpananLain[k]; };
+
+// ------------------------------------------- HK lintas bagian (anti dobel)
+const rapiNama = (n) => String(n || '').trim().toLowerCase().replace(/\s+/g, ' ');
+const rapiRek = (r) => String(r || '').replace(/[^0-9]/g, '');
+
+/**
+ * Peta HK per orang per tanggal dari SEMUA bagian payroll LAIN di repo ini
+ * (mis. dari bagian Padi+Infra: membaca bagian Pisang). Kuncinya nama +
+ * nomor rekening, karena nama saja banyak yang kembar.
+ */
+export async function petaHkBagianLain() {
+  const per = [];   // [{ nama, rek, bagian, perTanggal: {tgl: hk} }]
+  const dataset = state.daftar?.dataset || {};
+  for (const [path, meta] of Object.entries(dataset)) {
+    if (path === state.path || meta?.aplikasi !== 'PayrollHK') continue;
+    const lain = await muatBagianLain(path);
+    if (!lain?.tabel) continue;
+    const label = meta.label || path;
+    const orang = new Map();
+    for (const e of lain.tabel.employees || []) {
+      orang.set(Number(e.id), { nama: rapiNama(e.nama), rek: rapiRek(e.rekening),
+        asli: e.nama, bagian: label, perTanggal: {} });
+    }
+    for (const r of lain.tabel.daily_payroll || []) {
+      if (r.deleted_at) continue;
+      const o = orang.get(Number(r.employee_id));
+      if (!o) continue;
+      o.perTanggal[r.tanggal] = (o.perTanggal[r.tanggal] || 0) + (Number(r.hk) || 0);
+    }
+    for (const o of orang.values()) if (Object.keys(o.perTanggal).length) per.push(o);
+  }
+  return per;
+}
+
+/**
+ * HK orang ini pada satu tanggal di bagian lain.
+ * Cocok pasti  = nama sama DAN rekening sama (dua-duanya terisi).
+ * Cocok lemah  = nama sama tapi salah satu rekeningnya kosong.
+ * Rekening terisi dan BERBEDA = orang lain, tidak dihitung.
+ */
+export function hkLintas(peta, emp, tanggal) {
+  const nama = rapiNama(emp?.nama);
+  const rek = rapiRek(emp?.rekening);
+  let hk = 0; const dari = []; let lemah = false;
+  for (const o of peta) {
+    if (o.nama !== nama) continue;
+    if (rek && o.rek && o.rek !== rek) continue;      // rekening beda = orang lain
+    const n = o.perTanggal[tanggal] || 0;
+    if (!(n > 0)) continue;
+    hk += n;
+    dari.push(`${o.bagian}`);
+    if (!rek || !o.rek) lemah = true;
+  }
+  return hk > 0 ? { hk, bagian: [...new Set(dari)].join(', '), lemah } : null;
+}
+
+// -------------------------------------------------------------- menyimpan
+/** Penghitung isi untuk meta publik — beda per bagian, tanpa data pribadi. */
+function hitungIsi() {
+  const hidup = (t) => baris(t).filter((r) => !r.deleted_at);
+  if (state.aplikasi === 'AlatBerat') {
+    return {
+      jumlah: {
+        unit: baris('units').length,
+        operator: baris('operators').length,
+        log_kerja: baris('work_logs').length,
+        solar: baris('fuel_logs').length,
+        servis: baris('service_logs').length,
+      },
+      tanggal: baris('work_logs').map((r) => r.tanggal).filter(Boolean).sort(),
+    };
+  }
+  return {
+    jumlah: {
+      karyawan: baris('employees').length,
+      hk: hidup('daily_payroll').length,
+      borongan: hidup('borongan_transactions').length,
+      lembur: hidup('lembur_transactions').length,
+      premi: hidup('premi_transactions').length,
+    },
+    tanggal: hidup('daily_payroll').map((r) => r.tanggal).filter(Boolean).sort(),
+  };
+}
+
+function susunMeta() {
+  const { jumlah, tanggal } = hitungIsi();
+  return {
+    aplikasi: state.aplikasi,
+    label: state.meta?.label || (state.aplikasi === 'AlatBerat' ? 'Alat Berat & Kendaraan' : 'Payroll HK'),
+    rev: Number(state.data.rev) || 0,
+    diperbarui: new Date().toISOString().slice(0, 19),
+    dari: namaPengisi() ? `Web — ${namaPengisi()}` : 'Web',
+    jumlah,
+    periode: { dari: tanggal[0] || '', sampai: tanggal.at(-1) || '' },
+  };
+}
+
+/** Mode lokal: halaman dibuka tanpa repo GitHub (mis. ujicoba di komputer). */
+export const modeLokal = () => !gh.lokasiRepo();
+
+export async function simpan(pesan) {
+  if (!state.data) throw new Error('Belum ada data yang dimuat.');
+  if (!state.password) throw new Error('Password data belum dimasukkan.');
+
+  state.data.rev = (Number(state.data.rev) || 0) + 1;
+  state.data.dibuat = new Date().toISOString().slice(0, 19);
+  state.data.dari = namaPengisi() ? `Web — ${namaPengisi()}` : 'Web';
+  const meta = susunMeta();
+
+  const amplop = await kunciAmplop(state.data, state.password, meta);
+
+  // Tanpa repo tidak ada tempat mengirim, jadi hasilnya diunduh sebagai berkas.
+  // Berguna untuk ujicoba di komputer sendiri: berkasnya tinggal ditaruh di
+  // folder data/ (atau diimpor balik ke aplikasi desktop).
+  if (modeLokal()) {
+    const nama = state.path.split('/').pop() || 'data.json';
+    unduhTeks(nama, JSON.stringify(amplop), 'application/json');
+    state.meta = meta;
+    state.belumDisimpan = false;
+    return state.data.rev;
+  }
+
+  const judul = namaPengisi() ? `${pesan} (${namaPengisi()})` : pesan;
+  try {
+    state.sha = await gh.tulisFile(state.path, amplop, state.sha, judul);
+  } catch (e) {
+    state.data.rev -= 1;
+    throw e;
+  }
+  state.meta = meta;
+  state.belumDisimpan = false;
+  perbaruiDaftar(meta).catch(() => { /* daftar hanya pelengkap tampilan */ });
+  return state.data.rev;
+}
+
+async function perbaruiDaftar(meta) {
+  const { isi, sha } = await gh.bacaFile('data/daftar.json');
+  const dataset = { ...(isi?.dataset || {}) };
+  dataset[state.path] = {
+    label: meta.label, aplikasi: meta.aplikasi, rev: meta.rev,
+    diperbarui: meta.diperbarui, jumlah: meta.jumlah, periode: meta.periode,
+  };
+  await gh.tulisFile('data/daftar.json', { dataset, diperbarui: meta.diperbarui }, sha,
+    'Web: perbarui daftar dataset');
+}
+
+// ------------------------------------------------------------- perubahan
+// -------------------------------------------------- penjaga hak menulis
+// Dipasang oleh pengguna.js. Semua jalan menulis lewat sini — form,
+// input massal, salin hari, maupun impor Excel — jadi tidak ada pintu
+// samping yang perlu ditambal satu-satu.
+let penjagaTulis = null;
+export const pasangPenjagaTulis = (fn) => { penjagaTulis = fn; };
+
+function periksaTulis(aksi, tabel, isi) {
+  const alasan = alasanTulis(aksi, tabel, isi);
+  if (alasan) throw new Error(alasan);
+}
+
+/** Versi yang tidak melempar — untuk memeriksa lebih dulu, mis. pratinjau impor. */
+export const alasanTulis = (aksi, tabel, isi) =>
+  (penjagaTulis ? penjagaTulis(aksi, tabel, isi) : null);
+
+export function tambah(tabel, isi) {
+  periksaTulis('tambah', tabel, isi);
+  const r = { id: idBaru(tabel), created_at: sekarang(), ...isi };
+  // tabel payroll punya updated_at; tabel alat berat tidak
+  if (baris(tabel).some((x) => 'updated_at' in x) || state.aplikasi === 'PayrollHK') {
+    r.updated_at = sekarang();
+  }
+  baris(tabel).push(r);
+  state.belumDisimpan = true;
+  return r;
+}
+
+export function ubah(tabel, id, tambalan) {
+  const r = cari(tabel, id);
+  if (!r) throw new Error('Baris tidak ditemukan.');
+  periksaTulis('ubah', tabel, r);            // divisi ASAL
+  periksaTulis('ubah', tabel, { ...r, ...tambalan }); // dan divisi tujuan
+  Object.assign(r, tambalan);
+  if ('updated_at' in r) r.updated_at = sekarang();
+  state.belumDisimpan = true;
+  return r;
+}
+
+/** `lunak` hanya untuk tabel yang punya kolom deleted_at (transaksi payroll). */
+export function hapus(tabel, id, { lunak = false, aksi = 'hapus' } = {}) {
+  const daftar = baris(tabel);
+  const i = daftar.findIndex((r) => Number(r.id) === Number(id));
+  if (i < 0) throw new Error('Baris tidak ditemukan.');
+  periksaTulis(aksi, tabel, daftar[i]);
+  if (lunak) {
+    daftar[i].deleted_at = sekarang();
+    daftar[i].deleted_by = namaPengisi() || 'Web';
+  } else {
+    daftar.splice(i, 1);
+  }
+  state.belumDisimpan = true;
+}
+
+export function pulihkan(tabel, id) {
+  ubah(tabel, id, { deleted_at: null, deleted_by: null });
+}
+
+/** Nomor transaksi PREFIX-YYYYMMDD-000001 (hanya dipakai bagian Payroll). */
+export function nomorBaru(tabel, prefix, tanggal) {
+  const padat = String(tanggal).replaceAll('-', '');
+  const awalan = `${prefix}-${padat}-`;
+  let maks = 0;
+  for (const r of baris(tabel)) {
+    const n = r.nomor_transaksi;
+    if (typeof n === 'string' && n.startsWith(awalan)) {
+      const urut = parseInt(n.slice(awalan.length), 10);
+      if (Number.isFinite(urut) && urut > maks) maks = urut;
+    }
+  }
+  return awalan + String(maks + 1).padStart(6, '0');
+}

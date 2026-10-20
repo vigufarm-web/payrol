@@ -1,0 +1,517 @@
+// pengguna.js — siapa boleh menginput & merevisi divisi mana.
+//
+// Yang dibatasi di sini adalah MENULIS (tambah, revisi, hapus), bukan
+// melihat. Semua data ada dalam satu berkas terkunci, jadi siapa pun yang
+// tahu password data bisa membacanya — itu sifat penyimpanannya, bukan
+// sesuatu yang bisa ditutupi dari sisi halaman.
+//
+// Gunanya: mencegah salah masuk divisi orang lain, dan meninggalkan jejak
+// siapa membuat/mengubah baris. Bukan pagar terhadap orang yang berniat
+// menembusnya; untuk itu perlu password berbeda per kebun.
+
+import * as D from './data.js';
+import { el, tabel, isian, panel, tanya, pesan, kosongkan, kesalahan } from './ui.js';
+import { mintaPin, periksaPinAdmin, adminPinTerpasang, hashPin } from './kebun.js';
+
+const KUNCI_SESI = 'app.siapa';
+
+export const HAK = [
+  ['input', 'Input baru', 'Boleh menambah HK, borongan, lembur, premi, log alat'],
+  ['revisi', 'Revisi & hapus', 'Boleh mengubah dan menghapus baris yang sudah ada'],
+  ['setuju', 'Setujui lembur & premi', 'Boleh menyetujui/menolak sebagai kepala kebun'],
+  ['laporan', 'Lihat Laporan Kebun', 'Laporan biaya operasional kebunnya sendiri terhadap target'],
+  ['batal', 'Batalkan persetujuan', 'Boleh membatalkan lembur/premi/log yang telanjur di-acc (kembali jadi menunggu)'],
+  ['blok', 'Kelola blok & lahan', 'Admin blok lahan: menambah/mengubah master Blok — nama, luas (ha), divisi, aktif'],
+];
+
+// ------------------------------------------------------------ penyimpanan
+// Daftar pengguna disimpan SEKALI di bagian induk (Payroll Padi + Infra) dan
+// dibaca bagian lain dari sana — satu admin bisa diberi cakupan lintas bagian.
+export const BAGIAN_INDUK = 'data/payroll.json';
+let pusatCache = null;   // hasil baca dari bagian induk (saat bukan induk)
+
+export async function muatPusat() {
+  if (D.state.path === BAGIAN_INDUK) { pusatCache = null; return; }
+  try {
+    const induk = await D.muatBagianLain(BAGIAN_INDUK);
+    pusatCache = induk?.web?.pengguna || null;
+  } catch { pusatCache = null; }
+}
+
+const semua = () => {
+  if (D.state.path === BAGIAN_INDUK) return D.web().pengguna || {};
+  // bagian lain: pakai daftar induk; kalau induk tak terbaca, pakai lokal lama
+  return pusatCache || D.web().pengguna || {};
+};
+
+/** Cakupan satu pengguna pada satu bagian. Kompatibel dengan entri lama
+ *  (tanpa `akses`): entri lama berlaku untuk bagian induk saja. */
+function aksesEntry(p, path = D.state.path) {
+  if (!p) return null;
+  if (p.admin) return { divisi: 'semua' };
+  if (p.akses) return p.akses[path] || null;
+  return path === BAGIAN_INDUK ? { divisi: p.divisi || [] } : null;
+}
+
+/** Boleh membuka bagian (dataset) ini? */
+export function bolehBagian(path = D.state.path) {
+  if (!adaPengguna()) return true;
+  const p = siapa();
+  if (!p) return false;
+  return !!aksesEntry(p, path);
+}
+
+/** Daftar bagian yang boleh dibuka pengguna yang sedang masuk. */
+export function bagianBoleh() {
+  const ds = D.state.daftar?.dataset || {};
+  return Object.keys(ds).filter((p) => bolehBagian(p));
+}
+export const daftarPengguna = () => Object.entries(semua())
+  .map(([id, p]) => ({ id, ...p }))
+  .sort((a, b) => String(a.nama).localeCompare(String(b.nama), 'id'));
+
+export const adaPengguna = () => daftarPengguna().some((p) => p.aktif !== false);
+
+/** Pengguna yang sedang masuk di tab ini (null = belum pilih / fitur tidak dipakai). */
+export function siapa() {
+  const id = sessionStorage.getItem(KUNCI_SESI);
+  if (!id) return null;
+  const p = semua()[id];
+  if (!p || p.aktif === false) return null;
+  return { id, ...p };
+}
+
+export const namaSiapa = () => siapa()?.nama || '';
+export const adalahAdmin = () => siapa()?.admin === true;
+
+export function keluar() {
+  sessionStorage.removeItem(KUNCI_SESI);
+}
+
+// ------------------------------------------------------------------- hak
+/**
+ * Divisi yang boleh ditulis orang ini.
+ * null = semua divisi (fitur pengguna belum dipakai, atau dia admin).
+ *
+ * Catatan penting: kalau daftar pengguna SUDAH diisi tapi belum ada yang
+ * masuk, jawabannya "tidak boleh apa-apa" — bukan "boleh semua". Jadi
+ * menutup dialog pilih-nama tidak jadi jalan pintas.
+ */
+export function divisiBoleh() {
+  if (!adaPengguna()) return null;
+  const p = siapa();
+  if (!p) return [];
+  if (p.admin) return null;
+  const a = aksesEntry(p);
+  if (!a) return [];
+  if (a.divisi === 'semua') return null;
+  if (!Array.isArray(a.divisi) || !a.divisi.length) return [];
+  return a.divisi.map(Number);
+}
+
+export function bolehDivisi(divisionId) {
+  const boleh = divisiBoleh();
+  return boleh === null || boleh.includes(Number(divisionId));
+}
+
+export function punyaHak(nama) {
+  if (!adaPengguna()) return true;   // fitur pengguna belum dipakai
+  const p = siapa();
+  if (!p) return false;              // daftar ada tapi belum masuk
+  if (p.admin) return true;
+  return p.hak?.[nama] === true;
+}
+
+export const bolehInput = () => punyaHak('input');
+export const bolehRevisi = () => punyaHak('revisi');
+export const bolehSetuju = () => punyaHak('setuju');
+export const bolehLaporan = () => punyaHak('laporan');
+export const bolehBatal = () => punyaHak('batal');
+
+/** Kepala divisi murni: boleh monitor/acc tapi tidak menginput — menunya diringkas. */
+export function hanyaKepala() {
+  if (!adaPengguna()) return false;
+  const p = siapa();
+  if (!p || p.admin) return false;
+  return !bolehInput() && !bolehRevisi() && (bolehSetuju() || bolehLaporan());
+}
+
+/**
+ * Menu yang boleh muncul. Catatan jujur: ini menyembunyikan halaman, bukan
+ * menyembunyikan DATA — datanya tetap ada di berkas yang sudah terbuka.
+ */
+const HALAMAN_INPUT = new Set(['hk', 'borongan', 'lembur', 'impor', 'log', 'solar', 'servis']);
+
+export function bolehHalaman(kunci) {
+  if (!adaPengguna()) return true;
+  const p = siapa();
+  if (!p) return kunci === 'sistem';
+  if (p.admin) return true;
+  if (kunci === 'kebun' || kunci === 'monitor') return bolehLaporan();
+  if (kunci === 'beranda') return bolehSetuju() || bolehLaporan();
+  if (kunci === 'persetujuan') return bolehSetuju() || bolehBatal();
+  if (kunci === 'target' || kunci === 'pengguna' || kunci === 'tarifpremi') return false;  // admin saja
+  if (HALAMAN_INPUT.has(kunci)) return bolehInput() || bolehRevisi();
+  return true;
+}
+
+/** Master data umumnya hanya admin; master Blok boleh juga dipegang
+ *  "admin blok lahan" (hak Kelola blok & lahan). */
+export function bolehMasterTabel(namaTabel) {
+  if (!adaPengguna()) return true;
+  if (siapa()?.admin === true) return true;
+  return namaTabel === 'blocks' && punyaHak('blok');
+}
+export function bolehMaster() {
+  if (!adaPengguna()) return true;
+  return siapa()?.admin === true || punyaHak('blok');
+}
+
+/** Dipakai layar: apakah baris ini boleh dia ubah? */
+export function bolehUbahBaris(baris) {
+  if (!baris) return bolehRevisi();
+  const div = baris.division_id;
+  if (div == null) return bolehRevisi();
+  return bolehRevisi() && bolehDivisi(div);
+}
+
+// ---------------------------------------------------------------- penjaga
+const TABEL_MASTER = new Set([
+  'employees', 'divisions', 'blocks', 'activities', 'job_types', 'wage_components',
+  'units', 'operators',
+]);
+
+/**
+ * Dipanggil data.js sebelum setiap tambah/ubah/hapus.
+ * Mengembalikan alasan penolakan (string) atau null kalau boleh.
+ */
+function penjaga(aksi, tabelNama, isi) {
+  if (!adaPengguna()) return null;
+
+  const p = siapa();
+  if (!p) return 'Belum ada yang masuk. Pilih nama Anda dulu lewat tombol di menu kiri.';
+  if (p.admin) return null;
+
+  if (TABEL_MASTER.has(tabelNama)) {
+    if (tabelNama === 'blocks' && punyaHak('blok')) return null;  // admin blok lahan
+    return `Master data hanya bisa diubah admin. ${p.nama} tidak punya hak itu.`;
+  }
+
+  const perlu = aksi === 'tambah' ? 'input' : aksi === 'tolak' ? 'setuju' : 'revisi';
+  const labelAksi = { tambah: 'menginput', ubah: 'merevisi', hapus: 'menghapus', tolak: 'menolak' }[aksi];
+  if (!punyaHak(perlu)) return `${p.nama} tidak punya hak ${labelAksi}.`;
+
+  const div = isi?.division_id;
+  if (div != null && !bolehDivisi(div)) {
+    return `${p.nama} tidak boleh ${labelAksi} data divisi `
+      + `${D.labelRef('divisions', div)}.`;
+  }
+  return null;
+}
+
+/** Dipasang sekali saat aplikasi mulai. */
+export const pasangPenjaga = () => D.pasangPenjagaTulis(penjaga);
+
+// --------------------------------------------------------------- memilih
+/** Layar "siapa yang mengisi" setelah password data benar. */
+export async function pilihPengguna({ wajib = true } = {}) {
+  const orang = daftarPengguna().filter((p) => p.aktif !== false);
+  if (!orang.length) return true;
+
+  return new Promise((selesai) => {
+    const tempatGalat = el('div');
+    const pilih = el('select', {}, [
+      el('option', { value: '', teks: '— pilih nama —' }),
+      ...orang.map((p) => el('option', { value: p.id, teks: p.nama })),
+    ]);
+    const inPin = el('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off' });
+
+    const masuk = async () => {
+      kosongkan(tempatGalat);
+      const p = semua()[pilih.value];
+      if (!p) { tempatGalat.append(kesalahan(['Pilih nama dulu.'])); return; }
+      if (p.pin) {
+        const { hash } = await hashPin(inPin.value, p.pin.salt);
+        if (hash !== p.pin.hash) {
+          tempatGalat.append(kesalahan(['PIN salah.']));
+          inPin.value = ''; inPin.focus();
+          return;
+        }
+      }
+      sessionStorage.setItem(KUNCI_SESI, pilih.value);
+      // nama pengisi ikut nama pengguna, supaya jejak di tiap baris &
+      // di commit GitHub konsisten dan tidak bisa diketik sembarangan
+      D.setNamaPengisi(p.nama);
+      pan.tutup();
+      selesai(true);
+    };
+    inPin.addEventListener('keydown', (e) => { if (e.key === 'Enter') masuk(); });
+
+    const tombol = [
+      el('button.tombol-samar', {
+        type: 'button', teks: wajib ? 'Lihat saja' : 'Batal',
+        onclick: () => { pan.tutup(); selesai(false); },
+      }),
+      el('button.tombol-utama', { type: 'button', teks: 'Masuk', onclick: masuk }),
+    ];
+
+    const pan = panel('Siapa yang mengisi?', el('div', {}, [
+      tempatGalat,
+      el('p', { teks: 'Pilih nama Anda supaya tiap baris yang dibuat tercatat atas nama Anda, '
+        + 'dan divisi yang bukan bagian Anda tidak ikut terbuka untuk diubah.' }),
+      isian('Nama *', pilih),
+      isian('PIN', inPin, { bantuan: 'Kosongkan kalau nama Anda belum dipasangi PIN.' }),
+      el('p.bantuan', { teks: 'Kalau dilewati, situs tetap bisa dibuka untuk melihat laporan, '
+        + 'tapi tidak ada yang bisa diinput atau direvisi.' }),
+    ]), tombol);
+
+    setTimeout(() => pilih.focus(), 50);
+  });
+}
+
+// ------------------------------------------------------ halaman pengaturan
+export function halamanPengguna({ gambar, bisaEdit }) {
+  const wadah = el('section');
+  let terbuka = false;
+
+  const gambarIsi = () => {
+    kosongkan(wadah);
+
+    if (!terbuka) {
+      wadah.append(el('div.lembar', {}, [
+        el('div.lembar-kepala', {}, [el('h2', { teks: 'Pengguna & hak akses' })]),
+        el('div.lembar-isi', {}, [
+          el('p', {
+            teks: adminPinTerpasang()
+              ? 'Halaman ini menentukan siapa boleh menginput dan merevisi divisi mana. '
+                + 'Masukkan PIN admin untuk membukanya.'
+              : 'PIN admin belum dipasang. Pasang dulu di menu Pengaturan Kebun, '
+                + 'supaya daftar pengguna di sini tidak bisa diubah sembarang orang.',
+          }),
+          el('button.tombol-utama', {
+            type: 'button',
+            teks: 'Masukkan PIN admin',
+            onclick: async () => {
+              const ok = await mintaPin('PIN admin',
+                'PIN ini melindungi daftar pengguna dan hak aksesnya.', periksaPinAdmin);
+              if (ok) { terbuka = true; gambarIsi(); }
+            },
+          }),
+        ]),
+      ]));
+      return;
+    }
+
+    const diInduk = D.state.path === BAGIAN_INDUK;
+    if (!diInduk) {
+      wadah.append(el('div.petunjuk', {}, [
+        'Daftar pengguna disimpan terpusat di bagian Payroll Padi + Infra. '
+        + 'Untuk menambah atau mengubah, buka menu Pengguna di bagian itu.',
+      ]));
+    }
+    wadah.append(el('div.petunjuk', {}, [
+      el('p', { teks: 'Pembatasan ini berlaku untuk MENGINPUT dan MEREVISI, bukan untuk melihat. '
+        + 'Semua data ada dalam satu berkas terkunci, jadi siapa pun yang tahu password data '
+        + 'tetap bisa membaca seluruhnya.' }),
+      el('p', { teks: 'Gunanya mencegah salah masuk divisi orang lain dan mencatat siapa '
+        + 'membuat atau mengubah tiap baris. Untuk pemisahan yang betul-betul tidak bisa ditembus, '
+        + 'tiap kebun perlu password datanya sendiri.' }),
+    ]));
+
+    const dataset = D.state.daftar?.dataset || {};
+    const ringkasAkses = (p) => {
+      if (p.admin) return 'Semua bagian';
+      if (!p.akses) {
+        return (p.divisi || []).map((d) => D.labelRef('divisions', d)).join(', ') || '—';
+      }
+      return Object.entries(p.akses).map(([path, a]) => {
+        const label = dataset[path]?.label || path;
+        if (a.divisi === 'semua') return `${label}: semua`;
+        const nama = (a.divisi || []).map((d) => (path === D.state.path
+          ? D.labelRef('divisions', d) : null)).filter(Boolean);
+        return `${label}: ${nama.length ? nama.join(', ') : `${(a.divisi || []).length} divisi`}`;
+      }).join(' · ') || '—';
+    };
+    const baris = daftarPengguna().map((p) => ({
+      id: p.id,
+      nama: p.nama + (p.admin ? ' (admin)' : ''),
+      pin: p.pin ? 'Ya' : 'Belum',
+      divisi: ringkasAkses(p),
+      hak: p.admin ? 'Semua'
+        : HAK.filter(([k]) => p.hak?.[k]).map(([, l]) => l).join(', ') || 'Hanya melihat',
+      status: p.aktif === false ? 'Tidak aktif' : 'Aktif',
+    }));
+
+    wadah.append(el('div.lembar', {}, [
+      el('div.lembar-kepala', {}, [
+        el('h2', { teks: 'Daftar pengguna' }),
+        bisaEdit() && diInduk ? el('button.tombol-utama.tombol-kecil', {
+          type: 'button', teks: 'Tambah pengguna', onclick: () => formPengguna(null, gambarIsi),
+        }) : null,
+      ]),
+      el('div.lembar-isi', {}, [
+        el('p.bantuan', { teks: 'Klik satu baris untuk mengubahnya. Selama daftar ini kosong, '
+          + 'situs berjalan seperti biasa — semua orang yang punya token bisa mengisi apa saja.' }),
+        tabel([
+          { l: 'Nama', k: 'nama' },
+          { l: 'PIN', k: 'pin' },
+          { l: 'Boleh di mana', k: 'divisi' },
+          { l: 'Boleh', k: 'hak' },
+          { l: 'Status', k: 'status' },
+        ], baris, {
+          kosong: 'Belum ada pengguna. Tanpa daftar ini, pembatasan tidak berlaku.',
+          saatKlik: bisaEdit() && diInduk ? (r) => formPengguna(r.id, gambarIsi) : null,
+        }),
+      ]),
+    ]));
+  };
+
+  gambarIsi();
+  return wadah;
+}
+
+async function formPengguna(id, saatSelesai) {
+  const ada = id ? { id, ...(D.web().pengguna || {})[id] } : null;
+  const tempatGalat = el('div');
+  const inNama = el('input', { type: 'text', nilai: ada?.nama || '', placeholder: 'mis. A — Admin Pisang' });
+  const inPin = el('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off' });
+  const inAdmin = el('input', { type: 'checkbox' });
+  if (ada?.admin) inAdmin.checked = true;
+  const inAktif = el('input', { type: 'checkbox' });
+  inAktif.checked = ada ? ada.aktif !== false : true;
+
+  // ---- cakupan per BAGIAN: bagian mana + divisi mana yang boleh
+  // (daftar divisi bagian lain dibaca dari berkasnya masing-masing)
+  const dataset = D.state.daftar?.dataset || { [BAGIAN_INDUK]: { label: 'Bagian ini', aplikasi: 'PayrollHK' } };
+  const cakupan = [];   // { path, label, jenis, cSemua, centang: Map(divId -> c) }
+  for (const [path, meta] of Object.entries(dataset)) {
+    const aksesLama = ada?.akses?.[path]
+      || (path === BAGIAN_INDUK && ada && !ada.akses ? { divisi: ada.divisi || [] } : null);
+    const baris = { path, label: meta.label || path, jenis: meta.aplikasi, centang: new Map() };
+    baris.cSemua = el('input', { type: 'checkbox' });
+    if (aksesLama?.divisi === 'semua' || (baris.jenis !== 'PayrollHK' && aksesLama)) baris.cSemua.checked = true;
+    if (baris.jenis === 'PayrollHK') {
+      let divisi = [];
+      if (path === D.state.path) divisi = D.aktif('divisions');
+      else {
+        const lain = await D.muatBagianLain(path);
+        divisi = (lain?.tabel?.divisions || []).filter((d) => (d.status || 'Aktif') === 'Aktif');
+      }
+      for (const d of divisi) {
+        const c = el('input', { type: 'checkbox' });
+        if (Array.isArray(aksesLama?.divisi) && aksesLama.divisi.map(Number).includes(Number(d.id))) c.checked = true;
+        baris.centang.set(Number(d.id), { c, nama: d.nama_divisi });
+      }
+    }
+    cakupan.push(baris);
+  }
+
+  const kotakCakupan = el('div', {}, cakupan.map((b) => el('div', {
+    style: 'border:1px solid var(--garis-tipis);border-radius:8px;padding:.55rem .7rem;margin-bottom:.55rem',
+  }, [
+    el('label', { style: 'display:flex;gap:.45rem;align-items:center;font-size:.9rem' }, [
+      b.cSemua, el('strong', { teks: b.label }),
+      el('span.bantuan', { teks: b.jenis === 'PayrollHK' ? '— semua divisi' : '— seluruh bagian' }),
+    ]),
+    b.centang.size ? el('div', { style: 'display:flex;flex-wrap:wrap;gap:.7rem;margin:.4rem 0 0 1.6rem' },
+      [...b.centang.values()].map(({ c, nama }) => el('label', {
+        style: 'display:flex;gap:.3rem;align-items:center;font-size:.88rem',
+      }, [c, nama]))) : null,
+  ])));
+
+  const centangHak = new Map();
+  const kotakHak = el('div', {}, HAK.map(([k, label, ket]) => {
+    const c = el('input', { type: 'checkbox' });
+    if (ada?.hak?.[k]) c.checked = true;
+    centangHak.set(k, c);
+    return el('label', {
+      style: 'display:flex;gap:.45rem;align-items:flex-start;padding:.2rem 0;font-size:.9rem',
+    }, [c, el('span', {}, [el('strong', { teks: label }), el('br'), el('span.bantuan', { teks: ket })])]);
+  }));
+
+  const sesuaikanAdmin = () => {
+    const a = inAdmin.checked;
+    kotakCakupan.style.opacity = a ? '.45' : '';
+    kotakHak.style.opacity = a ? '.45' : '';
+    const semuaC = cakupan.flatMap((b) => [b.cSemua, ...[...b.centang.values()].map((x) => x.c)]);
+    for (const c of [...semuaC, ...centangHak.values()]) c.disabled = a;
+  };
+  inAdmin.addEventListener('change', sesuaikanAdmin);
+  sesuaikanAdmin();
+
+  const simpan = async () => {
+    const nama = inNama.value.trim();
+    const salah = [];
+    if (!nama) salah.push('Nama harus diisi.');
+
+    const akses = {};
+    for (const b of cakupan) {
+      if (b.cSemua.checked) { akses[b.path] = { divisi: 'semua' }; continue; }
+      const dipilih = [...b.centang.entries()].filter(([, x]) => x.c.checked).map(([idD]) => idD);
+      if (dipilih.length) akses[b.path] = { divisi: dipilih };
+    }
+    if (!inAdmin.checked && !Object.keys(akses).length) {
+      salah.push('Ceklis minimal satu bagian/divisi, atau jadikan admin.');
+    }
+    if (!ada && !inPin.value) salah.push('PIN harus diisi untuk pengguna baru.');
+    kosongkan(tempatGalat);
+    if (salah.length) { tempatGalat.append(kesalahan(salah)); return; }
+
+    const pin = inPin.value ? await hashPin(inPin.value) : (ada?.pin || null);
+    const kunci = id || `u${Date.now().toString(36)}`;
+    D.setWeb((w) => {
+      w.pengguna ||= {};
+      w.pengguna[kunci] = {
+        nama,
+        pin,
+        admin: inAdmin.checked,
+        akses: inAdmin.checked ? {} : akses,
+        hak: inAdmin.checked ? {} : Object.fromEntries(
+          [...centangHak.entries()].map(([k, c]) => [k, c.checked])),
+        aktif: inAktif.checked,
+      };
+    });
+    p.tutup();
+    pesan(`Pengguna ${nama} disimpan. Jangan lupa Simpan.`, 'sukses');
+    saatSelesai();
+  };
+
+  const hapusOrang = async () => {
+    const lanjut = await tanya(`Hapus pengguna ${ada.nama}?`,
+      'Baris yang pernah dia buat tidak ikut terhapus — namanya tetap tercatat di sana.',
+      { ya: 'Hapus', bahaya: true });
+    if (!lanjut) return;
+    D.setWeb((w) => { delete w.pengguna[id]; });
+    if (sessionStorage.getItem(KUNCI_SESI) === id) keluar();
+    p.tutup();
+    pesan(`Pengguna ${ada.nama} dihapus. Jangan lupa Simpan.`, 'sukses');
+    saatSelesai();
+  };
+
+  const p = panel(ada ? `Ubah pengguna — ${ada.nama}` : 'Tambah pengguna', el('div', {}, [
+    tempatGalat,
+    isian('Nama *', inNama, { bantuan: 'Tulis sekalian perannya supaya gampang dikenali.' }),
+    isian('PIN', inPin, {
+      bantuan: ada ? 'Kosongkan kalau PIN-nya tidak diganti.' : 'Dipakai saat dia membuka situs.',
+    }),
+    el('label', { style: 'display:flex;gap:.45rem;align-items:center;margin:.6rem 0' },
+      [inAdmin, el('strong', { teks: 'Admin — boleh semua bagian, semua divisi, semua hak' })]),
+    el('label', { style: 'display:block;font-size:.85rem;font-weight:600;margin:.8rem 0 .3rem' },
+      ['Boleh membuka & mengisi di mana saja (ceklis bagian / divisinya)']),
+    kotakCakupan,
+    el('label', { style: 'display:block;font-size:.85rem;font-weight:600;margin:.9rem 0 .3rem' },
+      ['Boleh apa saja (berlaku di semua yang diceklis)']),
+    kotakHak,
+    el('label', { style: 'display:flex;gap:.45rem;align-items:center;margin-top:.8rem' },
+      [inAktif, 'Aktif']),
+    el('p.bantuan', { style: 'margin-top:.8rem', teks: 'Master data lain (karyawan, kegiatan, unit) '
+      + 'hanya admin; master Blok bisa dipegang pemegang hak "Kelola blok & lahan".' }),
+  ]), [
+    ...(ada ? [el('button.tombol-samar', {
+      type: 'button', teks: 'Hapus', onclick: hapusOrang,
+    })] : []),
+    el('button.tombol-samar', { type: 'button', teks: 'Batal', onclick: () => p.tutup() }),
+    el('button.tombol-utama', { type: 'button', teks: 'Simpan', onclick: simpan }),
+  ]);
+}
+
