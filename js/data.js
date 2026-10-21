@@ -235,6 +235,28 @@ export function periodeTerkunci(tanggal) {
     (r) => Number(r.tahun) === th && Number(r.bulan) === bl && Number(r.status_lock) === 1);
 }
 
+/**
+ * HK orang ini pada satu tanggal, DIPECAH per divisi.
+ * Dipakai untuk membedakan dua hal yang kelihatannya sama:
+ *   • dobel input di divisi yang SAMA  → salah, ditolak
+ *   • orang yang memang kerja di DUA divisi pada hari yang sama
+ *     (mis. pagi di Padi, sore di Pisang) → boleh, tapi admin yang
+ *     menginput terakhir diberi peringatan supaya upahnya tidak dobel.
+ * Mengembalikan Map(division_id -> total HK). Divisi kosong kuncinya 0.
+ */
+export function hkHariPerDivisi(employeeId, tanggal, kecualiId = null) {
+  const per = new Map();
+  for (const r of baris('daily_payroll')) {
+    if (r.deleted_at) continue;
+    if (Number(r.employee_id) !== Number(employeeId)) continue;
+    if (r.tanggal !== tanggal) continue;
+    if (Number(r.id) === Number(kecualiId)) continue;
+    const k = r.division_id == null ? 0 : Number(r.division_id);
+    per.set(k, (per.get(k) || 0) + (Number(r.hk) || 0));
+  }
+  return per;
+}
+
 export function totalHkHari(employeeId, tanggal, kecualiId = null) {
   return baris('daily_payroll')
     .filter((r) => !r.deleted_at

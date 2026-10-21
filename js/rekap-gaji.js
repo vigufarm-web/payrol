@@ -16,6 +16,22 @@ import { unduhXlsx, S } from './xlsx-tulis.js';
 import { el, pesan, panel, isian } from './ui.js';
 
 const rapiRek = (s) => String(s || '').replace(/\D/g, '');
+// Samakan ejaan: "Pengawasan sore" & "Pengawasan Sore" dihitung SATU.
+// Yang ditampilkan adalah ejaan yang paling sering dipakai.
+const kunciLabel = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+function ejaanUtama(hitungan) {          // Map(kunci -> Map(ejaan -> berapa kali))
+  const pilih = new Map();
+  for (const [kunci, varian] of hitungan) {
+    let terbaik = null; let n = -1;
+    for (const [ejaan, jml] of varian) {
+      // paling sering; kalau seri, yang huruf kapitalnya lebih rapi
+      const skor = jml * 1000 + (/^[A-Z]/.test(ejaan) ? 1 : 0);
+      if (skor > n) { n = skor; terbaik = ejaan; }
+    }
+    pilih.set(kunci, terbaik);
+  }
+  return pilih;
+}
 const fmtTgl = (iso) => iso;   // kepala kolom matriks memakai tanggal ISO, ringkas
 
 function daftarTanggal(dari, sampai) {
@@ -43,13 +59,18 @@ export async function dataRekap(dari, sampai) {
     }
     return orang.get(k);
   };
-  const jobdesk = new Map();   // divisi -> Map(kegiatan -> {hk,pokok,tambahan})
+  const jobdesk = new Map();   // divisi -> Map(kunciLabel -> {hk,pokok,tambahan})
+  const ejaan = new Map();     // kunciLabel -> Map(ejaan asli -> jumlah pemakaian)
   const job = (divisi, label) => {
     if (!jobdesk.has(divisi)) jobdesk.set(divisi, new Map());
     const m = jobdesk.get(divisi);
-    const l = (label || '(tanpa keterangan)').trim() || '(tanpa keterangan)';
-    if (!m.has(l)) m.set(l, { hk: 0, pokok: 0, tambahan: 0 });
-    return m.get(l);
+    const asli = String(label || '').trim() || '(tanpa keterangan)';
+    const k = kunciLabel(asli);
+    if (!ejaan.has(k)) ejaan.set(k, new Map());
+    const v = ejaan.get(k);
+    v.set(asli, (v.get(asli) || 0) + 1);
+    if (!m.has(k)) m.set(k, { hk: 0, pokok: 0, tambahan: 0 });
+    return m.get(k);
   };
 
   // ---- payroll: HK harian
@@ -138,7 +159,8 @@ export async function dataRekap(dari, sampai) {
 
   const baris = [...orang.values()]
     .sort((a, b) => a.divisi.localeCompare(b.divisi, 'id') || a.nama.localeCompare(b.nama, 'id'));
-  return { baris, jobdesk, peringatan, batas, alatTerbaca, tanggal: daftarTanggal(dari, sampai) };
+  return { baris, jobdesk, labelKegiatan: ejaanUtama(ejaan), peringatan, batas, alatTerbaca,
+    tanggal: daftarTanggal(dari, sampai) };
 }
 
 // ----------------------------------------------------------- susun sheet
@@ -157,7 +179,7 @@ const kepalaLaporan = (judulKecil, dari, sampai, lebarKolom) => {
 };
 
 export async function susunRekap(dari, sampai) {
-  const { baris, jobdesk, peringatan, batas, alatTerbaca, tanggal } = await dataRekap(dari, sampai);
+  const { baris, jobdesk, labelKegiatan, peringatan, batas, alatTerbaca, tanggal } = await dataRekap(dari, sampai);
 
   // ---- 1. Summary Pembayaran: gabungkan per ORANG (nama+rek) lintas divisi
   const perOrang = new Map();
@@ -173,6 +195,8 @@ export async function susunRekap(dari, sampai) {
   s1.lebar = [5, 30, 15, 7, 14, 16, 15];
   s1.bekukan = 6;
   s1.baris.push(['No', 'Nama', 'Rek', 'HK', 'Gaji (Rp)', 'Lembur+Premi (Rp)', 'Total Gaji (Rp)'].map(S.kepala));
+  s1.filter = 'A6:G6';
+  s1.bekuKolom = 2;   // No & Nama tetap terlihat
   urut.forEach((o, i) => s1.baris.push([
     { v: i + 1, g: 12 }, S.teks(o.nama), S.teks(o.rek), S.angka(o.hk),
     S.uang(o.gaji), S.uang(o.tambahan), S.uang(o.gaji + o.tambahan)]));
@@ -193,22 +217,56 @@ export async function susunRekap(dari, sampai) {
   s2.lebar = [22, 48, 8, 16, 17, 16];
   s2.bekukan = 6;
   s2.baris.push(['Team', 'Kegiatan', 'HK', 'Gaji Pokok (Rp)', 'Lembur/Premi (Rp)', 'Total Gaji (Rp)'].map(S.kepala));
+  s2.filter = `A6:F6`;
   let g2 = { hk: 0, pokok: 0, tambahan: 0 };
+  const barisTotalDivisi = new Map();   // divisi -> nomor baris totalnya (untuk rumus di bawah)
   for (const div of [...jobdesk.keys()].sort((a, b) => a.localeCompare(b, 'id'))) {
     const m = jobdesk.get(div);
-    let sub = { hk: 0, pokok: 0, tambahan: 0 };
-    for (const keg of [...m.keys()].sort((a, b) => a.localeCompare(b, 'id'))) {
-      const x = m.get(keg);
-      s2.baris.push([S.teks(div), S.teks(keg), S.angka(x.hk), S.uang(x.pokok),
+    const sub = { hk: 0, pokok: 0, tambahan: 0 };
+    const urut = [...m.keys()]
+      .map((k) => ({ k, tampil: labelKegiatan.get(k) || k }))
+      .sort((a, b) => a.tampil.localeCompare(b.tampil, 'id'));
+    for (const { k, tampil } of urut) {
+      const x = m.get(k);
+      s2.baris.push([S.teks(div), S.teks(tampil), S.angka(x.hk), S.uang(x.pokok),
         S.uang(x.tambahan), S.uang(x.pokok + x.tambahan)]);
       sub.hk += x.hk; sub.pokok += x.pokok; sub.tambahan += x.tambahan;
     }
     s2.baris.push([S.teksT(div), S.teksT(`${div} Total`), S.angkaT(sub.hk),
       S.uangT(sub.pokok), S.uangT(sub.tambahan), S.uangT(sub.pokok + sub.tambahan)]);
+    barisTotalDivisi.set(div, s2.baris.length);   // 1-indeks = panjang setelah push
     g2.hk += sub.hk; g2.pokok += sub.pokok; g2.tambahan += sub.tambahan;
   }
   s2.baris.push([S.teksT('Grand Total'), S.teksT(''), S.angkaT(g2.hk),
     S.uangT(g2.pokok), S.uangT(g2.tambahan), S.uangT(g2.pokok + g2.tambahan)]);
+
+  // ---- bagian tambahan: Biaya Operasional & Penjualan (penjualan diisi manual)
+  const divisiUrut = [...barisTotalDivisi.keys()];
+  s2.baris.push([]);
+  const rPita = s2.baris.length + 1;
+  s2.baris.push([S.pita('BIAYA OPERASIONAL & PENJUALAN')]);
+  s2.merges.push(`A${rPita}:F${rPita}`);
+  s2.baris.push(['Divisi', 'Biaya Operasional (Rp)', 'Penjualan (Rp)', 'Selisih (Rp)', '', ''].map(S.kepala));
+  const rAwal = s2.baris.length + 1;
+  for (const div of divisiUrut) {
+    const r = s2.baris.length + 1;
+    s2.baris.push([
+      S.teks(div),
+      S.rumus(`F${barisTotalDivisi.get(div)}`),                      // biaya = total divisi di atas
+      S.rumus(`SUMIF(Penjualan!$A:$A,A${r},Penjualan!$D:$D)`),       // penjualan dari lembar Penjualan
+      S.rumus(`C${r}-B${r}`),
+      S.kosong(), S.kosong(),
+    ]);
+  }
+  const rAkhir = s2.baris.length;
+  s2.baris.push([S.teksT('Total'),
+    S.rumusT(`SUM(B${rAwal}:B${rAkhir})`),
+    S.rumusT(`SUM(C${rAwal}:C${rAkhir})`),
+    S.rumusT(`SUM(D${rAwal}:D${rAkhir})`),
+    S.teksT(''), S.teksT('')]);
+  s2.baris.push([]);
+  s2.baris.push([S.catatan('Penjualan diisi di lembar "Penjualan" — angkanya otomatis masuk ke sini '
+    + 'lewat nama divisi. Selisih = Penjualan − Biaya Operasional.')]);
 
   // ---- 3. Lampiran per Divisi
   const s3 = kepalaLaporan('LAMPIRAN PER DIVISI', dari, sampai, 7);
@@ -216,6 +274,7 @@ export async function susunRekap(dari, sampai) {
   s3.lebar = [22, 30, 15, 7, 14, 16, 15];
   s3.bekukan = 6;
   s3.baris.push(['Divisi', 'Nama', 'No Rek', 'HK', 'Gaji (Rp)', 'Lembur+Premi (Rp)', 'Total Gaji (Rp)'].map(S.kepala));
+  s3.filter = 'A6:G6';
   let divAktif = null; let sub3 = null; let g3 = { hk: 0, gaji: 0, tambahan: 0 };
   const tutupSub = () => {
     if (!sub3) return;
@@ -240,6 +299,7 @@ export async function susunRekap(dari, sampai) {
     s.nama = namaSheet;
     s.lebar = [20, 28, 14, ...tanggal.map(() => 11), 13];
     s.bekukan = 6;
+    s.bekuKolom = 3;   // Divisi/Nama/Rekening tetap terlihat saat menggulir tanggal
     s.baris.push(['Divisi', 'Nama', 'Rekening', ...tanggal.map(fmtTgl), 'Grand Total'].map(S.kepala));
     const totalKolom = tanggal.map(() => 0);
     let adaIsi = false; let totalSemua = 0;
@@ -262,12 +322,23 @@ export async function susunRekap(dari, sampai) {
   const s6 = matriks('UPAH PREMI (disetujui)', 'Detail Upah Premi', (b) => b.premi);
 
   // ---- 7. Penjualan (kosong, diisi manual)
-  const s7 = kepalaLaporan('PENJUALAN (diisi manual)', dari, sampai, 7);
+  const s7 = kepalaLaporan('PENJUALAN (diisi manual)', dari, sampai, 5);
   s7.nama = 'Penjualan';
-  s7.lebar = [13, 26, 18, 10, 10, 14, 16];
-  s7.baris.push(['Tanggal', 'Pembeli / Uraian', 'Komoditas', 'Qty', 'Satuan', 'Harga (Rp)', 'Total (Rp)'].map(S.kepala));
-  for (let i = 0; i < 30; i++) s7.baris.push([S.kosong(), S.kosong(), S.kosong(), S.kosong(), S.kosong(), S.kosong(), S.kosong()]);
-  s7.baris.push([S.teksT(''), S.teksT('Total'), S.teksT(''), S.teksT(''), S.teksT(''), S.teksT(''), S.uangT(0)]);
+  s7.lebar = [22, 14, 34, 18, 16];
+  s7.bekukan = 6;
+  s7.baris.push(['Divisi', 'Tanggal', 'Keterangan / Pembeli', 'Jumlah (Rp)', ''].map(S.kepala));
+  const rJualAwal = s7.baris.length + 1;
+  const BARIS_JUAL = 40;
+  for (let i = 0; i < BARIS_JUAL; i++) {
+    s7.baris.push([S.isianTeks(), S.isianTeks(), S.isianTeks(), S.isianUang(), S.kosong()]);
+  }
+  const rJualAkhir = s7.baris.length;
+  s7.baris.push([S.teksT('Grand Total'), S.teksT(''), S.teksT(''),
+    S.rumusT(`SUM(D${rJualAwal}:D${rJualAkhir})`), S.teksT('')]);
+  s7.baris.push([]);
+  s7.baris.push([S.catatan('Isi NAMA DIVISI persis seperti di lembar Summary Jobdesk '
+    + `(${divisiUrut.join(', ')}) supaya jumlahnya otomatis masuk ke bagian `
+    + '"Biaya Operasional & Penjualan". Tanggal boleh diketik dd/mm/yyyy.')]);
 
   // ---- 8. Peringatan HK
   const s8 = { nama: 'Peringatan HK', lebar: [34, 14, 8], baris: [], merges: [] };

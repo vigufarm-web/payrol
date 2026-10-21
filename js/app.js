@@ -25,6 +25,7 @@ import {
 import { halamanSistem, halamanRiwayat } from './sistem.js';
 import { halamanImpor } from './impor.js';
 import { halamanLaporanKebun, halamanPengaturanKebun, halamanPersetujuan, jumlahMenunggu } from './kebun.js';
+import { halamanMonitorSemua } from './monitor-semua.js';
 import * as P from './pengguna.js';
 import { halamanPengguna } from './pengguna.js';
 
@@ -91,6 +92,7 @@ const MODUL = {
     ],
     sistem: ['terhapus', 'riwayat', 'pengguna', 'sistem'],
     halaman: {
+      semua: { l: 'Monitoring Semua Divisi', sub: 'Operasional + alat berat & kendaraan jadi satu', buat: halamanMonitorSemua, periode: true },
       ringkasan: { l: 'Ringkasan', sub: 'Angka utama periode berjalan', buat: halamanRingkasan, periode: true },
       payroll: { l: 'Payroll', sub: 'Upah per pekerja untuk satu periode', buat: halamanPayroll, periode: true },
       rekap: { l: 'Rekap', sub: 'Biaya per divisi, blok, dan kegiatan', buat: halamanRekap, periode: true },
@@ -120,6 +122,7 @@ const MODUL = {
     ],
     sistem: ['riwayat', 'tarifpremi', 'pengguna', 'sistem'],
     halaman: {
+      semua: { l: 'Monitoring Semua Divisi', sub: 'Operasional + alat berat & kendaraan jadi satu', buat: halamanMonitorSemua, periode: true },
       unit: { l: 'Ringkasan unit', sub: 'Jam kerja, solar, dan efisiensi tiap unit', buat: halamanRingkasanUnit, periode: true },
       operator: { l: 'Payroll operator', sub: 'Upah operator untuk satu periode', buat: halamanPayrollOperator, periode: true },
       lokasi: { l: 'Biaya per lokasi', sub: 'Tenaga kerja, solar, dan servis per lokasi', buat: halamanBiayaLokasi, periode: true },
@@ -388,6 +391,18 @@ function bangunMenu() {
       el('strong', { teks: D.state.daftar?.dataset?.[D.state.path]?.label || m.nama }),
       el('span', { teks: m.keterangan }),
     ]),
+    // Monitoring Semua Divisi — khusus admin penuh. Ditaruh di atas tombol
+    // pindah bagian supaya admin tidak perlu bolak-balik antar bagian.
+    P.bolehMonitorSemua()
+      ? el('div', { style: 'padding:.6rem 1.1rem .2rem' }, [
+        el('button.tombol-kecil', {
+          type: 'button', style: 'width:100%',
+          teks: 'Monitoring Semua Divisi',
+          'aria-current': rute().nama === 'semua' ? 'page' : null,
+          onclick: () => { location.hash = '#/semua'; },
+        }),
+      ])
+      : null,
     // Pindah bagian — hanya tampil kalau memang ada bagian lain di repo ini
     lain.length
       ? el('div', { style: 'padding:.6rem 1.1rem .2rem' }, lain.map(([p, d]) => el('button.tombol-kecil', {

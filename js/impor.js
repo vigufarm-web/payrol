@@ -116,6 +116,7 @@ const JENIS = {
     ],
     periksa(baris, sudahMasuk, petaLintas = []) {
       const salah = [];
+      const peringatan = [];      // boleh masuk, tapi perlu dilihat admin
       const tgl = tanggalDari(baris.Tanggal);
       if (!tgl) salah.push(`Tanggal "${rapi(baris.Tanggal)}" tidak dikenali. Pakai bentuk 2026-10-20.`);
       else if (D.periodeTerkunci(tgl)) salah.push(`Periode ${ftanggal(tgl)} sudah dikunci di aplikasi desktop.`);
@@ -192,11 +193,25 @@ const JENIS = {
       if (pekerja && tgl && nilaiHk > 0) {
         const kunci = `${pekerja.id}|${tgl}`;
         const dariBerkas = sudahMasuk.get(kunci) || 0;
-        const total = D.totalHkHari(pekerja.id, tgl) + dariBerkas + nilaiHk;
+        // Pisahkan per divisi: dobel di divisi yang SAMA ditolak, sedangkan
+        // orang yang memang kerja di DUA divisi pada hari itu hanya
+        // diperingatkan (aturannya sama dengan form HK di layar).
+        const perDiv = D.hkHariPerDivisi(pekerja.id, tgl);
+        const divIni = divisi ? Number(divisi.id) : 0;
+        const diSini = (perDiv.get(divIni) || 0) + dariBerkas;
+        const lainDiv = [...perDiv.entries()].filter(([d]) => d !== divIni);
+        const hkLain = lainDiv.reduce((n, [, v]) => n + v, 0);
+        const total = diSini + hkLain + nilaiHk;
         const lintas = D.hkLintas(petaLintas, pekerja, tgl);
-        if (total > D.maksHkPerHari() + 1e-9) {
-          salah.push(`Total HK ${pekerja.nama} pada ${ftanggal(tgl)} jadi ${fhk(total)}, `
-            + `melebihi batas ${fhk(D.maksHkPerHari())} per hari.`);
+        if (diSini + nilaiHk > D.maksHkPerHari() + 1e-9) {
+          salah.push(`Total HK ${pekerja.nama} di divisi ini pada ${ftanggal(tgl)} jadi `
+            + `${fhk(diSini + nilaiHk)}, melebihi batas ${fhk(D.maksHkPerHari())} per hari.`);
+        } else if (total > D.maksHkPerHari() + 1e-9) {
+          peringatan.push(`${pekerja.nama} sudah tercatat `
+            + lainDiv.map(([d, v]) => `${fhk(v)} HK di ${d ? D.labelRef('divisions', d) : '(tanpa divisi)'}`).join(', ')
+            + ` pada ${ftanggal(tgl)} — dengan baris ini totalnya ${fhk(total)}. `
+            + 'Pastikan memang kerja di dua divisi hari itu.');
+          sudahMasuk.set(kunci, dariBerkas + nilaiHk);
         } else if (lintas && lintas.hk + total > D.maksHkPerHari() + 1e-9) {
           salah.push(`${pekerja.nama} sudah tercatat ${fhk(lintas.hk)} HK pada ${ftanggal(tgl)} `
             + `di bagian ${lintas.bagian} — baris ini membuatnya dobel antar divisi.`);
@@ -265,7 +280,7 @@ const JENIS = {
           },
         });
       });
-      return { pecah };
+      return { pecah, peringatan };
     },
     masukkan(daftar) {
       for (const r of daftar) {
@@ -515,11 +530,13 @@ function kotakJenis(kunci, { gambar, bisaEdit }) {
 
     const benar = [];
     const gagal = [];
+    const awas = [];                // boleh masuk, tapi perlu dilihat admin
     const sudahMasuk = new Map();   // batas HK per orang per hari dalam satu berkas
     const petaLintas = await D.petaHkBagianLain().catch(() => []);
     for (const baris of hasil.baris) {
       const p = def.periksa(baris, sudahMasuk, petaLintas);
       if (p.salah) { gagal.push({ baris, salah: p.salah }); continue; }
+      if (p.peringatan?.length) awas.push({ baris, catatan: p.peringatan });
 
       // hak pengguna diperiksa di sini juga, supaya baris yang tidak boleh
       // ditulis muncul sebagai "bermasalah" berikut alasannya — bukan
@@ -553,6 +570,16 @@ function kotakJenis(kunci, { gambar, bisaEdit }) {
         }))),
         gagal.length > 25 ? el('p', { teks: `…dan ${gagal.length - 25} baris lain.` }) : null,
         el('p', { teks: 'Perbaiki di Excel lalu upload lagi. Baris yang benar tetap bisa dimasukkan duluan.' }),
+      ]));
+    }
+
+    if (awas.length) {
+      tempatHasil.append(el('div.petunjuk', { role: 'status' }, [
+        el('strong', { teks: `${awas.length} baris boleh masuk, tapi periksa dulu:` }),
+        el('ul', {}, awas.slice(0, 25).map((a) => el('li', {
+          teks: `Baris ${a.baris._baris}: ${a.catatan.join(' ')}`,
+        }))),
+        awas.length > 25 ? el('p', { teks: `…dan ${awas.length - 25} baris lain.` }) : null,
       ]));
     }
 

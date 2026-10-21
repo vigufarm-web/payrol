@@ -154,7 +154,10 @@ export function panel(judul, isi, aksi = []) {
 export function tabel(kolom, data, { kosong = 'Belum ada data.', saatKlik = null, kunci = null } = {}) {
   if (!data.length) return el('p.kosong', { teks: kosong });
 
-  const rata = (j) => (j === 'angka' || j === 'uang' || j === 'hk' ? 'angka' : '');
+  const rataJenis = (j) => (j === 'angka' || j === 'uang' || j === 'hk' ? 'angka' : '');
+  const rata = (k) => (typeof k === 'object' && k !== null
+    ? (k.rata || rataJenis(k.jenis))
+    : rataJenis(k));
   const tampil = (k, r) => {
     const v = k.nilai ? k.nilai(r) : r[k.k];
     if (v instanceof Node) return v;
@@ -167,12 +170,12 @@ export function tabel(kolom, data, { kosong = 'Belum ada data.', saatKlik = null
     }
   };
 
-  const kepala = el('tr', {}, kolom.map((k) => el(`th.${rata(k.jenis)}`, { teks: k.l,
+  const kepala = el('tr', {}, kolom.map((k) => el(`th.${rata(k)}`, { teks: k.l,
     style: k.lebar ? `width:${k.lebar}` : null })));
 
   const isi = data.map((r) => {
     const tr = el('tr', kunci ? { dataset: { kunci: kunci(r) } } : {},
-      kolom.map((k) => el(`td.${rata(k.jenis)}`, {}, [tampil(k, r)])));
+      kolom.map((k) => el(`td.${rata(k)}`, {}, [tampil(k, r)])));
     if (saatKlik) {
       tr.classList.add('bisa-klik');
       tr.tabIndex = 0;
@@ -184,15 +187,16 @@ export function tabel(kolom, data, { kosong = 'Belum ada data.', saatKlik = null
 
   const adaTotal = kolom.some((k) => k.total);
   const kaki = adaTotal ? el('tr.baris-total', {}, kolom.map((k, i) => {
-    if (!k.total) return el(`td.${rata(k.jenis)}`, { teks: i === 0 ? 'Total' : '' });
+    if (!k.total) return el(`td.${rata(k)}`, { teks: i === 0 ? 'Total' : '' });
     // `nilaiTotal` dipakai kalau sel menampilkan teks (mis. "L 20.000 menunggu")
     // tapi barisan TOTAL-nya tetap harus menjumlah angka.
     const ambilAngka = (r) => (k.nilaiTotal
       ? k.nilaiTotal(r)
       : (k.nilai ? k.nilai(r) : r[k.k]));
     const jml = data.reduce((n, r) => n + (Number(ambilAngka(r)) || 0), 0);
-    return el(`td.${rata(k.jenis)}`, {
-      teks: k.jenis === 'uang' ? rupiah(jml) : k.jenis === 'hk' ? hk(jml) : angka(jml, k.pecahan ?? 0),
+    const jt = k.jenisTotal || k.jenis;   // sel bisa teks, totalnya tetap uang
+    return el(`td.${rata(k)}`, {
+      teks: jt === 'uang' ? rupiah(jml) : jt === 'hk' ? hk(jml) : angka(jml, k.pecahan ?? 0),
     });
   })) : null;
 
@@ -213,6 +217,9 @@ export function isian(label, kendali, { bantuan = null, lebar = null } = {}) {
   return el(`div.isian${lebar ? '.isian-' + lebar : ''}`, {}, [
     el('label', { for: id, teks: label }),
     kendali,
+    kendali._datalist || null,   // daftar saran (kalau kendali punya)
+    kendali._catatanEjaan || null,   // catatan "ejaan disamakan"
+
     bantuan ? el('small.bantuan', { teks: bantuan }) : null,
   ]);
 }

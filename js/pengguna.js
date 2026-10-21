@@ -155,12 +155,18 @@ export function bolehHalaman(kunci) {
     // "Lihat saja": semua halaman boleh DIBACA (pembatasan memang untuk
     // menginput/merevisi, bukan melihat — penjaga tulis tetap menolak).
     // Halaman bergembok PIN admin tetap butuh gemboknya dibuka di sesi ini.
+    // Monitoring semua divisi = hak admin. Belum ada yang masuk: boleh hanya
+    // kalau PIN admin sudah dibuka di sesi ini (gemboknya PIN itu).
+    if (kunci === 'semua') return sessionStorage.getItem('app.pengguna.buka') === '1';
     if (kunci === 'pengguna') return sessionStorage.getItem('app.pengguna.buka') === '1';
     if (kunci === 'target') return sessionStorage.getItem('app.target.buka') === '1';
     if (kunci === 'tarifpremi') return sessionStorage.getItem('app.tarif.buka') === '1';
     return true;
   }
   if (p.admin) return true;
+  // Monitoring Semua Divisi menyatukan angka SEMUA divisi dan semua bagian —
+  // hanya admin penuh, bukan admin divisi, bukan kepala divisi.
+  if (kunci === 'semua') return false;
   if (kunci === 'kebun' || kunci === 'monitor') return bolehLaporan();
   if (kunci === 'beranda') return bolehSetuju() || bolehLaporan();
   if (kunci === 'persetujuan') return bolehSetuju() || bolehBatal();
@@ -168,6 +174,9 @@ export function bolehHalaman(kunci) {
   if (HALAMAN_INPUT.has(kunci)) return bolehInput() || bolehRevisi();
   return true;
 }
+
+/** Khusus tombol "Monitoring Semua Divisi" di menu kiri — admin penuh saja. */
+export const bolehMonitorSemua = () => bolehHalaman('semua');
 
 /** Boleh mengelola halaman yang digembok PIN admin (pengguna/target/tarif)?
  *  Admin yang masuk jelas boleh. Belum ada yang masuk tapi PIN admin sudah
@@ -182,14 +191,34 @@ export function bolehKelolaTerkunci(flag) {
 
 /** Master data umumnya hanya admin; master Blok boleh juga dipegang
  *  "admin blok lahan" (hak Kelola blok & lahan). */
+/** Master mana yang boleh dibuka/diubah seseorang.
+ *  - Blok      : hanya "Admin blok lahan" (hak blok) atau admin penuh — blok
+ *                menentukan luas yang jadi dasar bagi upah, jadi satu pintu.
+ *  - Divisi    : hanya admin penuh (ini struktur kebunnya).
+ *  - Komponen  : hanya admin penuh — tarif lembur/premi/borongan berlaku untuk
+ *    upah         semua divisi, jadi satu pintu supaya tarifnya tidak berbeda-beda.
+ *  - Lainnya   : admin divisi yang boleh input/revisi juga boleh mengelola,
+ *                supaya tidak perlu menunggu admin pusat. Daftarnya disaring
+ *                sesuai pemakaian di divisinya (lihat saringMaster di master.js). */
+const MASTER_ADMIN_SAJA = new Set(['divisions', 'wage_components']);
+const LABEL_ADMIN_SAJA = {
+  divisions: 'Master Divisi',
+  wage_components: 'Master Komponen Upah',
+};
 export function bolehMasterTabel(namaTabel) {
   if (!adaPengguna()) return true;
   if (siapa()?.admin === true) return true;
-  return namaTabel === 'blocks' && punyaHak('blok');
+  if (namaTabel === 'blocks') return punyaHak('blok');
+  if (MASTER_ADMIN_SAJA.has(namaTabel)) return false;
+  // hak "blok" saja tidak cukup untuk master lain — penjaga tulis pun
+  // menolaknya, jadi menunya tidak boleh menjanjikan yang tidak bisa dipakai
+  return punyaHak('input') || punyaHak('revisi');
 }
 export function bolehMaster() {
   if (!adaPengguna()) return true;
-  return siapa()?.admin === true || punyaHak('blok');
+  const p = siapa();
+  if (!p) return false;
+  return p.admin === true || punyaHak('blok') || punyaHak('input') || punyaHak('revisi');
 }
 
 /** Dipakai layar: apakah baris ini boleh dia ubah? */
@@ -218,8 +247,17 @@ function penjaga(aksi, tabelNama, isi) {
   if (p.admin) return null;
 
   if (TABEL_MASTER.has(tabelNama)) {
-    if (tabelNama === 'blocks' && punyaHak('blok')) return null;  // admin blok lahan
-    return `Master data hanya bisa diubah admin. ${p.nama} tidak punya hak itu.`;
+    if (tabelNama === 'blocks') {
+      return punyaHak('blok') ? null
+        : `Master Blok hanya bisa diubah pemegang hak "Kelola blok & lahan". `
+          + `${p.nama} tidak punya hak itu.`;
+    }
+    if (MASTER_ADMIN_SAJA.has(tabelNama)) {
+      return `${LABEL_ADMIN_SAJA[tabelNama] || 'Master ini'} hanya bisa diubah admin. `
+        + `${p.nama} tidak punya hak itu.`;
+    }
+    if (punyaHak('input') || punyaHak('revisi')) return null;
+    return `${p.nama} tidak punya hak mengubah master data.`;
   }
 
   const perlu = aksi === 'tambah' ? 'input' : aksi === 'tolak' ? 'setuju' : 'revisi';

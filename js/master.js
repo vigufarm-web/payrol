@@ -82,6 +82,58 @@ function bacaForm(namaTabel, kendali) {
   return isi;
 }
 
+
+// ---------------------------------------------------------------------
+// Penjaga ejaan: mencegah nama master kembar karena salah ketik — beda
+// huruf besar/kecil ("Gudang"/"gudang"), spasi nyasar ("gu dang"), atau
+// salah satu huruf ("gudng"). Tidak diperbaiki diam-diam: pengguna
+// diberi tahu dan boleh memilih memakai yang sudah ada.
+// ---------------------------------------------------------------------
+const KOLOM_NAMA = {
+  activities: 'nama_kegiatan',
+  job_types: 'nama_jenis',
+  blocks: 'nama_blok',
+  wage_components: 'nama_komponen',
+  divisions: 'nama_divisi',
+};
+const rapat = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function jarakKetik(a, b) {           // Levenshtein sederhana, cukup untuk nama pendek
+  if (Math.abs(a.length - b.length) > 2) return 9;
+  const m = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) m[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      m[i][j] = Math.min(m[i - 1][j] + 1, m[i][j - 1] + 1,
+        m[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+  }
+  return m[a.length][b.length];
+}
+/** Baris master lain yang namanya mirip — beserta alasannya. */
+function namaMirip(namaTabel, isi, idSekarang) {
+  const kolom = KOLOM_NAMA[namaTabel];
+  if (!kolom || !isi[kolom]) return [];
+  const baru = String(isi[kolom]).trim();
+  const rBaru = rapat(baru);
+  if (rBaru.length < 3) return [];
+  const hasil = [];
+  for (const r of D.baris(namaTabel)) {
+    if (Number(r.id) === Number(idSekarang)) continue;
+    const lama = String(r[kolom] ?? '').trim();
+    if (!lama || lama === baru) continue;
+    const rLama = rapat(lama);
+    let sebab = null;
+    if (rLama === rBaru) {
+      sebab = lama.toLowerCase() === baru.toLowerCase()
+        ? 'beda huruf besar/kecil' : 'beda spasi atau tanda baca';
+    } else if (rBaru.length >= 5 && jarakKetik(rLama, rBaru) <= 1) {
+      sebab = 'beda satu huruf';
+    }
+    if (sebab) hasil.push({ nama: lama, sebab, id: r.id });
+  }
+  return hasil;
+}
+
 function periksa(namaTabel, isi, idSekarang) {
   const def = TABEL[namaTabel];
   const salah = [];
@@ -105,7 +157,7 @@ function formPanel(namaTabel, baris, saatSelesai) {
   const tempatGalat = el('div');
   const badan = el('div', {}, [tempatGalat, isiForm]);
 
-  const simpan = () => {
+  const simpan = async () => {
     const isi = bacaForm(namaTabel, kendali);
     const salah = periksa(namaTabel, isi, baris?.id);
     kosongkan(tempatGalat);
@@ -113,6 +165,21 @@ function formPanel(namaTabel, baris, saatSelesai) {
       tempatGalat.append(kesalahan(salah));
       badan.scrollTop = 0;
       return;
+    }
+    // Nama mirip dengan yang sudah ada? Beri tahu dulu — jangan diam-diam
+    // membuat dua master yang sebenarnya sama (bikin rekap terpecah dua).
+    const mirip = namaMirip(namaTabel, isi, baris?.id);
+    if (mirip.length) {
+      const kolom = KOLOM_NAMA[namaTabel];
+      const lanjut = await tanya('Nama mirip sudah ada', el('div', {}, [
+        el('p', { teks: `"${isi[kolom]}" mirip dengan ${def.tunggal} yang sudah ada:` }),
+        el('ul', {}, mirip.slice(0, 5).map((m) => el('li', {
+          teks: `${m.nama}  —  ${m.sebab}`,
+        }))),
+        el('p', { teks: 'Kalau sebenarnya sama, batalkan dan pakai yang sudah ada supaya '
+          + 'rekap tidak terpecah dua. Kalau memang beda, lanjutkan.' }),
+      ]), { ya: 'Tetap simpan sebagai baru', tidak: 'Batal — pakai yang sudah ada' });
+      if (!lanjut) return;
     }
     if (baris) D.ubah(namaTabel, baris.id, isi);
     else D.tambah(namaTabel, isi);
@@ -143,7 +210,73 @@ function formPanel(namaTabel, baris, saatSelesai) {
 }
 
 // ------------------------------------------------------------ halaman
-export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus }) {
+
+// ---------------------------------------------------------------------
+// Saring daftar master sesuai divisi yang diceklis untuk pengguna ini.
+// Dari lima tabel master, hanya BLOK yang punya kolom divisi; sisanya
+// (karyawan, kegiatan, jenis pekerjaan, komponen upah) memang dipakai
+// bersama — itu bawaan database aplikasi desktop. Supaya admin divisi
+// tidak perlu menyaring 260 jenis pekerjaan milik divisi lain, daftarnya
+// disaring berdasarkan PEMAKAIAN di divisinya; baris yang belum terpakai
+// di mana pun tetap ditampilkan (supaya yang baru dibuat tidak hilang).
+// ---------------------------------------------------------------------
+const KOLOM_PAKAI = {
+  employees: [['daily_payroll', 'employee_id'], ['lembur_transactions', 'employee_id'],
+    ['premi_transactions', 'employee_id'], ['borongan_transactions', 'employee_id']],
+  activities: [['daily_payroll', 'activity_id']],
+  job_types: [['daily_payroll', 'job_type_id']],
+  wage_components: [['lembur_transactions', 'wage_component_id'],
+    ['premi_transactions', 'wage_component_id'], ['borongan_transactions', 'wage_component_id']],
+};
+/** Divisi mana saja yang memakai tiap baris master — dibaca dari transaksi.
+ *  Dipakai untuk kolom "Divisi" di daftar master supaya terlihat jelas siapa
+ *  anggota divisi mana, dan untuk menyaring daftarnya. */
+function petaDivisi(namaTabel) {
+  const peta = KOLOM_PAKAI[namaTabel];
+  const hasil = new Map();
+  if (!peta) return hasil;
+  for (const [tabel, kolom] of peta) {
+    for (const r of D.baris(tabel)) {
+      if (r.deleted_at) continue;
+      const v = r[kolom];
+      if (v == null || r.division_id == null) continue;
+      const id = Number(v);
+      if (!hasil.has(id)) hasil.set(id, new Set());
+      hasil.get(id).add(Number(r.division_id));
+    }
+  }
+  return hasil;
+}
+
+function saringMaster(namaTabel, data, divisiBoleh) {
+  if (divisiBoleh == null) return data;                 // admin: semua
+  if (namaTabel === 'blocks') {
+    const ok = new Set(divisiBoleh.map(Number));
+    return data.filter((r) => r.division_id == null || ok.has(Number(r.division_id)));
+  }
+  const peta = KOLOM_PAKAI[namaTabel];
+  if (!peta) return data;
+  const ok = new Set(divisiBoleh.map(Number));
+  const dipakaiDiSaya = new Set();
+  const dipakaiOrangLain = new Set();
+  for (const [tabel, kolom] of peta) {
+    for (const r of D.baris(tabel)) {
+      if (r.deleted_at) continue;
+      const v = r[kolom];
+      if (v == null) continue;
+      const d = r.division_id == null ? null : Number(r.division_id);
+      if (d == null || ok.has(d)) dipakaiDiSaya.add(Number(v));
+      else dipakaiOrangLain.add(Number(v));
+    }
+  }
+  return data.filter((r) => {
+    const id = Number(r.id);
+    if (dipakaiDiSaya.has(id)) return true;             // dipakai di divisi saya
+    return !dipakaiOrangLain.has(id);                   // belum dipakai siapa pun
+  });
+}
+
+export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus, hak }) {
   TABEL = kamus.TABEL;
   REF_TRANSAKSI = kamus.REF || {};
   const def = TABEL[namaTabel];
@@ -154,8 +287,11 @@ export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus }) {
 
   const tempatTabel = el('div');
 
+  const divisiBoleh = () => (hak?.divisi ? hak.divisi() : null);
   const gambarTabel = () => {
-    let data = D.baris(namaTabel);
+    const semuaBaris = D.baris(namaTabel);
+    let data = saringMaster(namaTabel, semuaBaris, divisiBoleh());
+    const disaring = data.length !== semuaBaris.length;
     if (hanyaAktif) data = data.filter(D.barisAktif);
     if (kataCari) {
       const q = kataCari.toLowerCase();
@@ -163,6 +299,30 @@ export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus }) {
         (k) => String(r[k] ?? '').toLowerCase().includes(q)));
     }
     data = [...data].sort((a, b) => String(def.label(a) ?? '').localeCompare(String(def.label(b) ?? ''), 'id'));
+    const catatanSaring = disaring
+      ? el('p.bantuan', { teks: namaTabel === 'blocks'
+        ? 'Hanya blok divisi Anda yang ditampilkan.'
+        : `Hanya ${def.judul.toLowerCase()} divisi Anda yang ditampilkan — lihat kolom Divisi. `
+          + 'Yang belum terpakai di mana pun ikut ditampilkan, dan yang dipakai di '
+          + 'beberapa divisi muncul di daftar masing-masing divisi itu.' })
+      : null;
+
+    // Kolom "Divisi" tempelan: tabel ini tidak punya kolom divisi di database,
+    // jadi divisinya dibaca dari transaksi — supaya tetap kelihatan siapa
+    // anggota divisi mana. Blok sudah punya kolom divisi sendiri.
+    const pakaiDivisi = KOLOM_PAKAI[namaTabel] && namaTabel !== 'blocks';
+    const jejakDivisi = pakaiDivisi ? petaDivisi(namaTabel) : null;
+    const kolomDivisi = pakaiDivisi ? {
+      l: 'Divisi',
+      k: '_divisi',
+      jenis: 'teks',
+      nilai: (r) => {
+        const s = jejakDivisi.get(Number(r.id));
+        if (!s || !s.size) return '— belum terpakai —';
+        return [...s].map((d) => D.labelRef('divisions', d))
+          .sort((a, b) => String(a).localeCompare(String(b), 'id')).join(', ');
+      },
+    } : null;
 
     const kolom = def.f
       .filter((f) => f.t !== 'area')
@@ -179,9 +339,12 @@ export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus }) {
               ? (r) => (r[f.k] ? TERSEMBUNYI : '')
               : null,
       }));
+    // Divisi ditaruh setelah kolom nama, sebelum kolom-kolom rinci lainnya.
+    if (kolomDivisi) kolom.splice(Math.min(2, kolom.length), 0, kolomDivisi);
 
     taruh(kosongkan(tempatTabel),
       el('p.samar', { style: 'margin:0 0 .5rem', teks: `${data.length} dari ${D.baris(namaTabel).length} ${def.tunggal}` }),
+      catatanSaring,
       tabel(kolom, data, {
         kosong: `Belum ada ${def.tunggal}.`,
         saatKlik: bisaEdit() ? (r) => formPanel(namaTabel, r, () => { gambarTabel(); gambar(); }) : null,

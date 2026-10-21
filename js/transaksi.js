@@ -54,6 +54,55 @@ const jenisDiKegiatan = (activityId) => D.aktif('job_types')
 
 const hidup = (t) => D.baris(t).filter((r) => !r.deleted_at);
 
+/** Daftar saran untuk kolom keterangan: nilai yang SUDAH pernah dipakai, agar
+ *  orang memilih ejaan yang sama alih-alih mengetik ulang (sumber typo
+ *  "Pengawasan sore" vs "Pengawasan Sore"). Ejaan yang paling sering dipakai
+ *  ditawarkan lebih dulu. */
+function pasangSaran(kendali, ambilNilai) {
+  const hitung = new Map();
+  for (const t of ['daily_payroll', 'lembur_transactions', 'premi_transactions', 'borongan_transactions']) {
+    for (const r of D.baris(t)) {
+      const v = String(ambilNilai(r) || '').trim();
+      if (!v) continue;
+      hitung.set(v, (hitung.get(v) || 0) + 1);
+    }
+  }
+  const urut = [...hitung.entries()].sort((a, b) => b[1] - a[1]).slice(0, 300);
+  if (!urut.length) return kendali;
+  const id = `saran${Math.random().toString(36).slice(2, 9)}`;
+  const dl = el('datalist', { id }, urut.map(([v]) => el('option', { value: v })));
+  kendali.setAttribute('list', id);
+  kendali._datalist = dl;   // disisipkan ke panel oleh isian()
+
+  // Perbaikan ejaan OTOMATIS: begitu selesai mengetik, kalau tulisannya sama
+  // dengan yang sudah pernah dipakai (beda huruf besar/kecil, spasi, atau
+  // tanda baca), ejaannya disamakan — supaya rekap tidak terpecah dua.
+  // Yang dipakai adalah ejaan yang paling sering muncul di data.
+  const rapat = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const utama = new Map();           // bentuk rapat -> ejaan terbanyak
+  for (const [v, n] of urut) {
+    const kk = rapat(v);
+    if (!kk) continue;
+    const ada = utama.get(kk);
+    if (!ada || n > ada.n) utama.set(kk, { v, n });
+  }
+  const catatan = el('small.bantuan', { teks: ' ' });
+  kendali._catatanEjaan = catatan;
+  kendali.addEventListener('blur', () => {
+    const diketik = kendali.value.trim();
+    if (!diketik) { catatan.textContent = ' '; return; }
+    const cocok = utama.get(rapat(diketik));
+    if (cocok && cocok.v !== diketik) {
+      kendali.value = cocok.v;
+      catatan.textContent = `Ejaan disamakan dengan yang sudah dipakai: "${cocok.v}".`;
+    } else {
+      catatan.textContent = ' ';
+    }
+  });
+  return kendali;
+}
+
+
 /** Saring baris yang DITAMPILKAN sesuai divisi yang diceklis untuk pengguna
  *  ini — admin melihat semua. Ini perapian tampilan (biar admin Pisang tidak
  *  melihat input divisi Padi), bukan pengaman rahasia: datanya tetap satu
@@ -102,7 +151,8 @@ function bagianTambahan(kategori, satuanBawaan) {
   const komponen = komponenManual(kategori);
   const inQty = el('input', { type: 'number', step: '0.01', min: '0' });
   const inTarif = el('input', { type: 'number', step: '500', min: '0' });
-  const inKet = el('input', { type: 'text' });
+  const inKet = pasangSaran(el('input', { type: 'text', autocomplete: 'off' }),
+    (r) => r.keterangan_manual);
   const hitungan = el('p.bantuan', { teks: ' ' });
   const isiDalam = el('div', { style: 'display:none; border-left:3px solid var(--garis); padding-left:.8rem' }, [
     komponen
@@ -181,7 +231,8 @@ function formHK(barisAda, tgl, saatSelesai) {
     { saatUbah: () => { isiJenis(); } });
   const inJenis = pilihan([], awal('job_type_id'));
   const inHk = el('input', { type: 'number', step: '0.05', min: '0', max: String(D.maksHkPerHari()), nilai: barisAda?.hk ?? 1 });
-  const inJob = el('input', { type: 'text', nilai: barisAda?.job ?? '' });
+  const inJob = pasangSaran(el('input', { type: 'text', nilai: barisAda?.job ?? '', autocomplete: 'off' }),
+    (r) => r.job);
   const inCatatan = el('input', { type: 'text', nilai: barisAda?.catatan ?? '' });
 
   // ---- blok -----------------------------------------------------------
@@ -459,12 +510,24 @@ function formHK(barisAda, tgl, saatSelesai) {
 
     const totalBaru = rencana.reduce((n, r) => n + r.hk, 0);
     let lintas = null;
+    let bedaDivisi = null;     // kerja di divisi lain pada hari yang sama
     if (emp && totalBaru > 0) {
-      const disini = D.totalHkHari(emp.id, tglNilai, barisAda?.id);
-      const total = disini + totalBaru;
-      if (total > D.maksHkPerHari() + 1e-9) {
-        salah.push(`Total HK ${emp.nama} pada ${ftanggal(tglNilai)} jadi ${fhk(total)}, `
-          + `melebihi batas ${fhk(D.maksHkPerHari())} per hari.`);
+      const perDiv = D.hkHariPerDivisi(emp.id, tglNilai, barisAda?.id);
+      const divIni = Number(inDivisi.value) || 0;
+      const diDivisiIni = perDiv.get(divIni) || 0;
+      const diDivisiLain = [...perDiv.entries()]
+        .filter(([d]) => d !== divIni)
+        .map(([d, n]) => ({ divisi: d ? D.labelRef('divisions', d) : '(tanpa divisi)', hk: n }));
+      const hkLain = diDivisiLain.reduce((n, x) => n + x.hk, 0);
+      const total = diDivisiIni + hkLain + totalBaru;
+      // Dobel di divisi yang SAMA = jelas keliru → tolak.
+      if (diDivisiIni + totalBaru > D.maksHkPerHari() + 1e-9) {
+        salah.push(`Total HK ${emp.nama} di divisi ini pada ${ftanggal(tglNilai)} jadi `
+          + `${fhk(diDivisiIni + totalBaru)}, melebihi batas ${fhk(D.maksHkPerHari())} per hari.`);
+      } else if (total > D.maksHkPerHari() + 1e-9) {
+        // Divisi BERBEDA: memang bisa terjadi (pagi di Padi, sore di Pisang) —
+        // jangan ditolak, tapi admin yang menginput terakhir harus diberi tahu.
+        bedaDivisi = { daftar: diDivisiLain, hkLain, total };
       }
       // anti dobel input ANTAR BAGIAN: orang yang sama (nama + rekening)
       // mungkin sudah dicatat admin bagian lain di tanggal itu
@@ -481,6 +544,23 @@ function formHK(barisAda, tgl, saatSelesai) {
 
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); badan.scrollTop = 0; return; }
+
+    // Orang yang sama sudah punya HK di DIVISI LAIN pada hari itu. Boleh
+    // diteruskan (memang kerja di dua divisi), tapi jangan diam-diam —
+    // yang menginput terakhir yang melihat peringatan ini.
+    if (bedaDivisi) {
+      const rinci = bedaDivisi.daftar
+        .map((x) => `${x.divisi} ${fhk(x.hk)} HK`).join(', ');
+      const lanjut = await tanya(`${emp.nama} sudah punya HK hari itu di divisi lain`, el('div', {}, [
+        el('p', { teks: `Pada ${ftanggal(tglNilai)} ${emp.nama} sudah tercatat di ${rinci}. `
+          + `Ditambah ${fhk(totalBaru)} HK dari input ini, totalnya jadi `
+          + `${fhk(bedaDivisi.total)} — di atas batas ${fhk(D.maksHkPerHari())} per hari.` }),
+        el('p', { teks: 'Kalau memang orangnya kerja di dua divisi pada hari itu, lanjutkan. '
+          + 'Kalau tidak, upahnya akan terhitung dobel — kurangi HK-nya atau hubungi admin '
+          + 'divisi satunya dulu.' }),
+      ]), { ya: 'Memang kerja dua divisi — simpan', tidak: 'Perbaiki dulu' });
+      if (!lanjut) return;
+    }
 
     // masih muat di bawah batas, tapi orangnya sudah ada kerjaan di bagian lain:
     // beri tahu dulu, jangan diam-diam
@@ -898,10 +978,28 @@ function formMassal(tgl, saatSelesai) {
     const totalHk = Number(inHk.value);
     if (!(totalHk > 0)) salah.push('HK harus lebih dari 0.');
 
-    const lewatBatas = dipilih.filter(
-      (e) => D.totalHkHari(e.id, inTanggal.value) + totalHk > D.maksHkPerHari() + 1e-9);
+    // Dobel di divisi yang SAMA ditolak; kerja di DIVISI LAIN pada hari yang
+    // sama hanya diperingatkan (lihat hkHariPerDivisi di data.js).
+    const divIniMassal = Number(inDivisi.value) || 0;
+    const lewatBatas = [];
+    const bedaDivisiMassal = [];
+    for (const e of dipilih) {
+      const perDiv = D.hkHariPerDivisi(e.id, inTanggal.value);
+      const diSini = perDiv.get(divIniMassal) || 0;
+      const lain = [...perDiv.entries()].filter(([d]) => d !== divIniMassal);
+      const hkLain = lain.reduce((n, [, v]) => n + v, 0);
+      if (diSini + totalHk > D.maksHkPerHari() + 1e-9) lewatBatas.push(e);
+      else if (diSini + hkLain + totalHk > D.maksHkPerHari() + 1e-9) {
+        bedaDivisiMassal.push({
+          e,
+          divisi: lain.map(([d]) => (d ? D.labelRef('divisions', d) : '(tanpa divisi)')).join(', '),
+          hkLain,
+          total: diSini + hkLain + totalHk,
+        });
+      }
+    }
     if (lewatBatas.length) {
-      salah.push(`${lewatBatas.length} pekerja akan melebihi batas HK hari itu: `
+      salah.push(`${lewatBatas.length} pekerja akan melebihi batas HK hari itu di divisi ini: `
         + lewatBatas.slice(0, 5).map((e) => e.nama).join(', ')
         + (lewatBatas.length > 5 ? ', dan lainnya' : '') + '.');
     }
@@ -919,6 +1017,20 @@ function formMassal(tgl, saatSelesai) {
 
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); badan.scrollTop = 0; return; }
+
+    if (bedaDivisiMassal.length) {
+      const lanjut = await tanya(`${bedaDivisiMassal.length} pekerja sudah punya HK hari itu di divisi lain`,
+        el('div', {}, [
+          el('p', { teks: bedaDivisiMassal.slice(0, 6)
+            .map((b) => `${b.e.nama}: ${fhk(b.hkLain)} HK di ${b.divisi} → jadi ${fhk(b.total)}`)
+            .join('. ') + (bedaDivisiMassal.length > 6
+            ? `, dan ${bedaDivisiMassal.length - 6} lagi.` : '.') }),
+          el('p', { teks: `Totalnya di atas batas ${fhk(D.maksHkPerHari())} per hari. Lanjutkan hanya `
+            + 'kalau orangnya memang kerja di dua divisi pada hari itu — kalau tidak, upahnya dobel.' }),
+        ]),
+        { ya: 'Memang kerja dua divisi — simpan', tidak: 'Perbaiki dulu' });
+      if (!lanjut) return;
+    }
 
     const sisaBentrok = bentrok.filter((x) => !x.lewat);
     if (sisaBentrok.length) {
@@ -1043,12 +1155,22 @@ function formSalinHari(tglTujuan, saatSelesai) {
 
     let masuk = 0;
     const lewat = [];
+    const awasDivisi = [];
     for (const r of sumber) {
       const nilaiHk = Number(r.hk) || 0;
-      const total = D.totalHkHari(r.employee_id, tglTujuan) + nilaiHk;
-      if (total > D.maksHkPerHari() + 1e-9) {
+      // sama seperti form HK: dobel di divisi yang sama dilewati, kerja di
+      // divisi lain pada hari itu tetap disalin tapi dilaporkan
+      const perDiv = D.hkHariPerDivisi(r.employee_id, tglTujuan);
+      const divBaris = r.division_id == null ? 0 : Number(r.division_id);
+      const diSini = perDiv.get(divBaris) || 0;
+      const hkLain = [...perDiv.entries()]
+        .filter(([d]) => d !== divBaris).reduce((n, [, v]) => n + v, 0);
+      if (diSini + nilaiHk > D.maksHkPerHari() + 1e-9) {
         lewat.push(D.labelRef('employees', r.employee_id));
         continue;
+      }
+      if (diSini + hkLain + nilaiHk > D.maksHkPerHari() + 1e-9) {
+        awasDivisi.push(D.labelRef('employees', r.employee_id));
       }
       const emp = D.cari('employees', r.employee_id);
       const tarif = Number(emp?.tarif_hk ?? r.tarif_hk_snapshot) || 0;
@@ -1073,6 +1195,12 @@ function formSalinHari(tglTujuan, saatSelesai) {
     pesan(lewat.length
       ? `${masuk} baris disalin. ${lewat.length} dilewati karena HK-nya sudah penuh hari itu.`
       : `${masuk} baris disalin ke ${ftanggal(tglTujuan)}.`, 'sukses', 8);
+    if (awasDivisi.length) {
+      pesan(`${[...new Set(awasDivisi)].length} pekerja jadi lebih dari `
+        + `${fhk(D.maksHkPerHari())} HK karena sudah tercatat di divisi lain pada `
+        + `${ftanggal(tglTujuan)}: ${[...new Set(awasDivisi)].slice(0, 4).join(', ')}`
+        + `${awasDivisi.length > 4 ? ', dll' : ''}. Periksa di daftar "Peringatan HK".`, 'awas', 12);
+    }
     saatSelesai();
   };
 
@@ -1153,10 +1281,13 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
       for (const r of hidup(tabelT)) {
         if (r.tanggal !== tgl) continue;
         const k = Number(r.employee_id);
-        if (!tambahan.has(k)) tambahan.set(k, { potongan: [], menunggu: false, jumlah: 0 });
+        if (!tambahan.has(k)) tambahan.set(k, { per: new Map(), menunggu: false, jumlah: 0 });
         const t = tambahan.get(k);
-        t.jumlah += Number(r.nominal) || 0;
-        t.potongan.push(`${kode} ${rupiah(Number(r.nominal) || 0)}`);
+        const n = Number(r.nominal) || 0;
+        t.jumlah += n;
+        // jumlahkan per jenis (L/P) — lembur yang dibagi ke banyak blok
+        // tampil sebagai SATU angka, bukan "L 5.000 + L 5.000 + …"
+        t.per.set(kode, (t.per.get(kode) || 0) + n);
         if (D.menungguPersetujuan(tabelT, r.id)) t.menunggu = true;
       }
     }
@@ -1167,7 +1298,8 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
       const t = tambahan.get(k);
       if (!t || sudahTampil.has(k)) return '';
       sudahTampil.add(k);
-      return t.potongan.join(' + ') + (t.menunggu ? ' ⏳' : ' ✓');
+      const bagian = [...t.per.entries()].map(([kode, n]) => `${kode} ${rupiah(n)}`);
+      return bagian.join(' + ') + (t.menunggu ? ' ⏳' : ' ✓');
     };
 
     const terkunci = D.periodeTerkunci(tgl);
@@ -1181,7 +1313,7 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
         { l: 'Jenis', nilai: (r) => D.labelRef('job_types', r.job_type_id) },
         { l: 'HK', k: 'hk', jenis: 'hk', total: true },
         { l: 'Upah (Rp)', k: 'nominal', jenis: 'uang', total: true },
-        { l: 'Lembur/Premi (Rp)', nilai: selTambahan, jenis: 'uang', total: true,
+        { l: 'Lembur/Premi (Rp)', nilai: selTambahan, rata: 'angka', jenisTotal: 'uang', total: true,
           // total = jumlah lembur+premi tanggal itu, dihitung sekali per pekerja
           nilaiTotal: (r) => {
             const k = Number(r.employee_id);

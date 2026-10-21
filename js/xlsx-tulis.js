@@ -15,6 +15,11 @@ export const GAYA = {
   kepala: 4, teks: 5, uang: 6, angka: 7,
   totalTeks: 8, totalUang: 9, totalAngka: 10,
   tebal: 11, strip: 12,
+  pita: 13,        // pita judul bagian (latar hijau tua, huruf putih)
+  tanggal: 14,     // tanggal dd/mm/yyyy
+  isianUang: 15,   // sel kosong siap diisi tangan (latar kuning muda)
+  isianTeks: 16,
+  catatan: 17,     // keterangan kecil miring
 };
 
 // pembuat sel praktis
@@ -32,6 +37,14 @@ export const S = {
   teksT: (v) => ({ v: v ?? '', g: GAYA.totalTeks }),
   tebal: (v) => ({ v: v ?? '', g: GAYA.tebal }),
   kosong: () => ({ v: '', g: GAYA.teks }),
+  pita: (v) => ({ v, g: GAYA.pita }),
+  tanggal: (v) => ({ v: v ?? '', g: GAYA.tanggal }),
+  isianUang: () => ({ v: '', g: GAYA.isianUang }),
+  isianTeks: () => ({ v: '', g: GAYA.isianTeks }),
+  catatan: (v) => ({ v, g: GAYA.catatan }),
+  // rumus Excel (dihitung sendiri oleh Excel saat dibuka)
+  rumus: (f, gaya = GAYA.uang) => ({ f, g: gaya }),
+  rumusT: (f) => ({ f, g: GAYA.totalUang }),
 };
 
 const esc = (s) => String(s)
@@ -45,7 +58,7 @@ export function kolomHuruf(n) {        // 1 -> A, 27 -> AA
 }
 
 // ------------------------------------------------------------ XML sheet
-function sheetXml({ lebar = [], merges = [], baris = [], bekukan = 0 }) {
+function sheetXml({ lebar = [], merges = [], baris = [], bekukan = 0, bekuKolom = 0, filter = null }) {
   const kol = lebar.length
     ? `<cols>${lebar.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>`
     : '';
@@ -54,6 +67,7 @@ function sheetXml({ lebar = [], merges = [], baris = [], bekukan = 0 }) {
       if (c == null) return '';
       const ref = `${kolomHuruf(i + 1)}${r + 1}`;
       const g = c.g ? ` s="${c.g}"` : '';
+      if (c.f) return `<c r="${ref}"${g}><f>${esc(String(c.f).replace(/^=/, ''))}</f></c>`;
       if (typeof c.v === 'number' && Number.isFinite(c.v)) return `<c r="${ref}"${g}><v>${c.v}</v></c>`;
       if (c.v === '' || c.v == null) return `<c r="${ref}"${g}/>`;
       return `<c r="${ref}"${g} t="inlineStr"><is><t xml:space="preserve">${esc(c.v)}</t></is></c>`;
@@ -63,26 +77,35 @@ function sheetXml({ lebar = [], merges = [], baris = [], bekukan = 0 }) {
   const gab = merges.length
     ? `<mergeCells count="${merges.length}">${merges.map((m) => `<mergeCell ref="${m}"/>`).join('')}</mergeCells>`
     : '';
-  const beku = bekukan
-    ? `<sheetViews><sheetView workbookViewId="0"><pane ySplit="${bekukan}" topLeftCell="A${bekukan + 1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>`
+  const beku = (bekukan || bekuKolom)
+    ? `<sheetViews><sheetView workbookViewId="0"><pane ${bekuKolom ? `xSplit="${bekuKolom}" ` : ''}`
+      + `${bekukan ? `ySplit="${bekukan}" ` : ''}`
+      + `topLeftCell="${kolomHuruf(bekuKolom + 1)}${bekukan + 1}" `
+      + `activePane="${bekuKolom && bekukan ? 'bottomRight' : bekuKolom ? 'topRight' : 'bottomLeft'}" `
+      + 'state="frozen"/></sheetView></sheetViews>'
     : '<sheetViews><sheetView workbookViewId="0"/></sheetViews>';
+  const saring = filter ? `<autoFilter ref="${filter}"/>` : '';
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${beku}${kol}<sheetData>${isi}</sheetData>${gab}</worksheet>`;
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${beku}${kol}<sheetData>${isi}</sheetData>${saring}${gab}</worksheet>`;
 }
 
 const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<numFmts count="2"><numFmt numFmtId="164" formatCode="#,##0"/><numFmt numFmtId="165" formatCode="#,##0.0#"/></numFmts>
-<fonts count="4"><font><sz val="10"/><name val="Calibri"/></font>
+<numFmts count="3"><numFmt numFmtId="164" formatCode="#,##0"/><numFmt numFmtId="165" formatCode="#,##0.0#"/><numFmt numFmtId="166" formatCode="dd/mm/yyyy"/></numFmts>
+<fonts count="6"><font><sz val="10"/><name val="Calibri"/></font>
 <font><b/><sz val="14"/><name val="Calibri"/></font>
 <font><b/><sz val="10"/><name val="Calibri"/></font>
-<font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
-<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>
+<font><b/><sz val="11"/><name val="Calibri"/></font>
+<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+<font><i/><sz val="9"/><color rgb="FF666666"/><name val="Calibri"/></font></fonts>
+<fills count="6"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFDDEAE0"/></patternFill></fill>
-<fill><patternFill patternType="solid"><fgColor rgb="FFF2F6F3"/></patternFill></fill></fills>
+<fill><patternFill patternType="solid"><fgColor rgb="FFF2F6F3"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FF1F5132"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFFFF8DC"/></patternFill></fill></fills>
 <borders count="2"><border/><border><left style="thin"/><right style="thin"/><top style="thin"/><bottom style="thin"/></border></borders>
-<cellStyleXfs count="1"><xf/></cellStyleXfs>
-<cellXfs count="13">
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="18">
 <xf/>
 <xf fontId="1" applyFont="1" applyAlignment="1"><alignment horizontal="left"/></xf>
 <xf fontId="3" applyFont="1"/>
@@ -96,7 +119,14 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <xf numFmtId="165" fontId="2" fillId="3" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
 <xf fontId="2" applyFont="1"/>
 <xf borderId="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>
-</cellXfs></styleSheet>`;
+<xf fontId="4" fillId="4" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+<xf numFmtId="166" borderId="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>
+<xf numFmtId="164" fillId="5" borderId="1" applyNumberFormat="1" applyFill="1" applyBorder="1"/>
+<xf fillId="5" borderId="1" applyFill="1" applyBorder="1"/>
+<xf fontId="5" applyFont="1"/>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
 
 // --------------------------------------------------------------- zip
 const TABEL_CRC = (() => {
