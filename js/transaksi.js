@@ -1033,6 +1033,28 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
       .sort((x, y) => D.labelRef('employees', x.employee_id)
         .localeCompare(D.labelRef('employees', y.employee_id), 'id'));
 
+    // lembur & premi orang itu pada tanggal yang sama, supaya langsung
+    // kelihatan dari daftar HK (ditampilkan di baris pertama tiap pekerja)
+    const tambahan = new Map();   // employee_id -> { teks, menunggu }
+    for (const [tabelT, kode] of [['lembur_transactions', 'L'], ['premi_transactions', 'P']]) {
+      for (const r of hidup(tabelT)) {
+        if (r.tanggal !== tgl) continue;
+        const k = Number(r.employee_id);
+        if (!tambahan.has(k)) tambahan.set(k, { potongan: [], menunggu: false });
+        const t = tambahan.get(k);
+        t.potongan.push(`${kode} ${rupiah(Number(r.nominal) || 0)}`);
+        if (D.menungguPersetujuan(tabelT, r.id)) t.menunggu = true;
+      }
+    }
+    const sudahTampil = new Set();
+    const selTambahan = (r) => {
+      const k = Number(r.employee_id);
+      const t = tambahan.get(k);
+      if (!t || sudahTampil.has(k)) return '';
+      sudahTampil.add(k);
+      return t.potongan.join(' + ') + (t.menunggu ? ' ⏳' : ' ✓');
+    };
+
     const terkunci = D.periodeTerkunci(tgl);
     taruh(kosongkan(tempat),
       terkunci ? el('div.petunjuk', {}, [`Periode ${ftanggal(tgl)} sudah dikunci — data tidak bisa diubah.`]) : null,
@@ -1044,10 +1066,15 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
         { l: 'Jenis', nilai: (r) => D.labelRef('job_types', r.job_type_id) },
         { l: 'HK', k: 'hk', jenis: 'hk', total: true },
         { l: 'Upah (Rp)', k: 'nominal', jenis: 'uang', total: true },
+        { l: 'Lembur/Premi', nilai: selTambahan },
       ], data, {
         kosong: `Belum ada HK pada ${ftanggal(tgl)}.`,
         saatKlik: bisaEdit() && !terkunci ? (r) => formHK(r, tgl, () => { gambarIsi(); gambar(); }) : null,
       }),
+      tambahan.size ? el('p.bantuan', {
+        teks: 'Kolom Lembur/Premi: L = lembur, P = premi pada tanggal itu. '
+          + '✓ sudah di-acc kepala kebun, ⏳ masih menunggu. Rinciannya di menu Lembur & premi.',
+      }) : null,
     );
   };
 

@@ -52,6 +52,28 @@ export const periode = {
 // (ujicoba di komputer sendiri — hasil simpanannya diunduh sebagai berkas).
 export const bisaEdit = () => !!gh.ambilToken() || D.modeLokal();
 
+// ---------------------------------------------------------------------
+// Simpan otomatis: beberapa detik setelah perubahan terakhir, data dikirim
+// sendiri ke GitHub — admin tidak harus ingat menekan tombol Simpan.
+// Bisa dimatikan di Pengaturan. Saat ujicoba lokal tetap manual (karena
+// "menyimpan" di sana berarti mengunduh berkas).
+// ---------------------------------------------------------------------
+const KUNCI_AUTOSIMPAN = 'app.autosimpan';
+export const autoSimpanAktif = () => localStorage.getItem(KUNCI_AUTOSIMPAN) !== '0';
+export const setAutoSimpan = (aktif) => localStorage.setItem(KUNCI_AUTOSIMPAN, aktif ? '1' : '0');
+let timerAutoSimpan = null;
+let sedangAutoSimpan = false;
+D.saatBerubah(() => {
+  if (!autoSimpanAktif() || D.modeLokal() || !bisaEdit()) return;
+  clearTimeout(timerAutoSimpan);
+  timerAutoSimpan = setTimeout(async () => {
+    if (sedangAutoSimpan || !D.state.belumDisimpan) return;
+    sedangAutoSimpan = true;
+    try { await simpanSekarang('Web: simpan otomatis'); }
+    finally { sedangAutoSimpan = false; }
+  }, 8000);
+});
+
 // =====================================================================
 // Dua bagian aplikasi
 // =====================================================================
@@ -280,6 +302,17 @@ function sesuaikanPeriode() {
 
 async function bangunKerangka() {
   sesuaikanPeriode();
+  // ada input yang belum sempat terkirim (mis. listrik padam)? tawarkan pulih
+  const draf = await D.drafTersimpan();
+  if (draf) {
+    const pulih = await tanya('Ada input yang belum tersimpan', el('div', {}, [
+      el('p', { teks: `Perubahan terakhir ${waktu(draf.waktu)} belum sempat terkirim ke GitHub `
+        + '(mis. listrik padam atau tab tertutup). Pulihkan dan lanjutkan dari situ?' }),
+      el('p.bantuan', { teks: 'Kalau dibuang, data kembali persis seperti simpanan terakhir di GitHub.' }),
+    ]), { ya: 'Pulihkan', tidak: 'Buang' });
+    if (pulih) D.pakaiDraf(draf);
+    else D.hapusDraf();
+  }
   // daftar pengguna terpusat di bagian induk — baca dulu
   await P.muatPusat();
   // kalau daftar pengguna sudah diisi, tanyakan dulu siapa yang mengisi

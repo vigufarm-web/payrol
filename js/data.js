@@ -77,6 +77,68 @@ const sekarang = () => {
 
 const WEB_KOSONG = () => ({ kebun: {}, target: {}, persetujuan: {}, adminPin: null });
 
+
+// Dipanggil setiap ada perubahan yang belum disimpan. Modul app memasang
+// pendengar di sini untuk simpan-otomatis.
+let pendengarBerubah = null;
+export const saatBerubah = (fn) => { pendengarBerubah = fn; };
+function tandaiBerubah() {
+  state.belumDisimpan = true;
+  jadwalkanDraf();
+  try { pendengarBerubah?.(); } catch { /* jangan ganggu alur input */ }
+}
+
+// ---------------------------------------------------------------------
+// DRAF CADANGAN LOKAL — pengaman mati listrik / tab tertutup.
+// Beberapa detik setelah perubahan, seluruh data ditulis TERENKRIPSI ke
+// penyimpanan peramban. Saat situs dibuka lagi dan ternyata ada draf yang
+// belum sempat terkirim (rev-nya masih sama dengan berkas di GitHub),
+// pengguna ditawari memulihkannya — tidak perlu mengulang input.
+// Draf dihapus otomatis begitu penyimpanan ke GitHub berhasil.
+// ---------------------------------------------------------------------
+const kunciDraf = () => `app.draf.${state.path}`;
+let timerDraf = null;
+function jadwalkanDraf() {
+  if (!state.password || !state.data) return;
+  clearTimeout(timerDraf);
+  timerDraf = setTimeout(async () => {
+    try {
+      const amp = await kunciAmplop(state.data, state.password, { draf: true });
+      localStorage.setItem(kunciDraf(), JSON.stringify({
+        rev: Number(state.data.rev) || 0, waktu: new Date().toISOString(), amp }));
+    } catch { /* penyimpanan penuh / terblokir — lewati saja */ }
+  }, 2500);
+}
+
+export function hapusDraf() {
+  clearTimeout(timerDraf);
+  try { localStorage.removeItem(kunciDraf()); } catch { /* abaikan */ }
+}
+
+/** Draf yang belum terkirim dari sesi sebelumnya, atau null. */
+export async function drafTersimpan() {
+  try {
+    const mentah = localStorage.getItem(kunciDraf());
+    if (!mentah || !state.data) return null;
+    const { rev, waktu, amp } = JSON.parse(mentah);
+    if (Number(rev) !== (Number(state.data.rev) || 0)) {
+      // sudah ada simpanan lebih baru (dari sini atau komputer lain) — basi
+      localStorage.removeItem(kunciDraf());
+      return null;
+    }
+    const isi = await bukaAmplop(amp, state.password);
+    return { waktu, data: isi };
+  } catch { return null; }
+}
+
+/** Pakai draf sebagai data aktif (belum tersimpan -> ikut simpan otomatis). */
+export function pakaiDraf(draf) {
+  state.data = draf.data;
+  state.aplikasi = draf.data.aplikasi || state.aplikasi;
+  gh.setTokenBersama(draf.data.web?.token || '');
+  tandaiBerubah();
+}
+
 export function web() {
   if (!state.data) return WEB_KOSONG();
   if (!state.data.web) state.data.web = WEB_KOSONG();
@@ -91,7 +153,7 @@ export function web() {
 export function setWeb(ubah) {
   const w = web();
   ubah(w);
-  state.belumDisimpan = true;
+  tandaiBerubah();
   return w;
 }
 
@@ -398,6 +460,7 @@ export async function simpan(pesan) {
     unduhTeks(nama, JSON.stringify(amplop), 'application/json');
     state.meta = meta;
     state.belumDisimpan = false;
+    hapusDraf();
     return state.data.rev;
   }
 
@@ -410,6 +473,7 @@ export async function simpan(pesan) {
   }
   state.meta = meta;
   state.belumDisimpan = false;
+  hapusDraf();   // input sudah aman di GitHub, cadangan lokal tak diperlukan lagi
   perbaruiDaftar(meta).catch(() => { /* daftar hanya pelengkap tampilan */ });
   return state.data.rev;
 }
@@ -450,7 +514,7 @@ export function tambah(tabel, isi) {
     r.updated_at = sekarang();
   }
   baris(tabel).push(r);
-  state.belumDisimpan = true;
+  tandaiBerubah();
   return r;
 }
 
@@ -461,7 +525,7 @@ export function ubah(tabel, id, tambalan) {
   periksaTulis('ubah', tabel, { ...r, ...tambalan }); // dan divisi tujuan
   Object.assign(r, tambalan);
   if ('updated_at' in r) r.updated_at = sekarang();
-  state.belumDisimpan = true;
+  tandaiBerubah();
   return r;
 }
 
@@ -477,7 +541,7 @@ export function hapus(tabel, id, { lunak = false, aksi = 'hapus' } = {}) {
   } else {
     daftar.splice(i, 1);
   }
-  state.belumDisimpan = true;
+  tandaiBerubah();
 }
 
 export function pulihkan(tabel, id) {

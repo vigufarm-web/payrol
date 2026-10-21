@@ -4,6 +4,9 @@
 import * as D from './data.js';
 import * as gh from './github.js';
 import * as P from './pengguna.js';
+// impor melingkar dengan app.js aman: hanya dipakai saat tombol diklik,
+// bukan saat modul dimuat
+import * as A0 from './app.js';
 import {
   el, tabel, isian, kosongkan, pesan, tanya, waktu, angka, panel,
 } from './ui.js';
@@ -73,6 +76,21 @@ export function halamanSistem({ gambar, bisaEdit, muatUlangData }) {
               type: 'text', nilai: D.namaPengisi(), placeholder: 'mis. Budi (kantor kebun)',
               onchange: (e) => { D.setNamaPengisi(e.target.value); pesan('Nama disimpan.', 'sukses'); gambar(); },
             }), { bantuan: 'Dicatat pada setiap penyimpanan.' }),
+          ]),
+          el('label', { style: 'display:flex;gap:.45rem;align-items:center;margin:.4rem 0 .8rem' }, [
+            (() => {
+              const c = el('input', { type: 'checkbox' });
+              c.checked = A0.autoSimpanAktif();
+              c.onchange = () => {
+                A0.setAutoSimpan(c.checked);
+                pesan(c.checked
+                  ? 'Simpan otomatis AKTIF — perubahan terkirim sendiri beberapa detik setelah input.'
+                  : 'Simpan otomatis mati — jangan lupa tekan tombol Simpan ke GitHub.', 'sukses', 6);
+              };
+              return c;
+            })(),
+            el('span', {}, [el('strong', { teks: 'Simpan otomatis' }),
+              el('span.bantuan', { teks: ' — kirim sendiri ke GitHub beberapa detik setelah input terakhir.' })]),
           ]),
           // berbagi token: cukup admin yang mengisi, yang lain otomatis
           bolehAtur && gh.adaTokenLokal() && !dibagikan ? el('div', { style: 'margin:.6rem 0' }, [
