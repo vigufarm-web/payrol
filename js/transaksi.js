@@ -481,7 +481,12 @@ function formHK(barisAda, tgl, saatSelesai) {
       if (!lanjut) return;
     }
 
-    const tarif = barisAda?.tarif_hk_snapshot ?? emp.tarif_hk ?? 0;
+    const tarif = Number(barisAda?.tarif_hk_snapshot) || Number(emp.tarif_hk) || 0;
+    if (!(tarif > 0) && !await tanya('Tarif HK pekerja ini 0', el('div', {}, [
+      el('p', { teks: `${emp.nama} belum punya tarif HK di master Karyawan, jadi upah baris ini `
+        + 'akan tercatat Rp 0.' }),
+      el('p', { teks: 'Isi dulu tarifnya di menu Karyawan, atau tetap simpan kalau memang begitu?' }),
+    ]), { ya: 'Tetap simpan', tidak: 'Perbaiki dulu' })) return;
     const buatIsi = (r) => ({
       tanggal: tglNilai,
       employee_id: emp.id,
@@ -886,6 +891,13 @@ function formMassal(tgl, saatSelesai) {
       if (!lanjut) return;
     }
 
+    const tanpaTarif = dipilih.filter((e) => !(Number(e.tarif_hk) > 0));
+    if (tanpaTarif.length && !await tanya('Ada pekerja tanpa tarif HK', el('div', {}, [
+      el('p', { teks: `${tanpaTarif.length} pekerja belum punya tarif HK di master Karyawan, `
+        + 'jadi upahnya akan tercatat Rp 0:' }),
+      el('ul', {}, tanpaTarif.slice(0, 8).map((e) => el('li', { teks: e.nama }))),
+      tanpaTarif.length > 8 ? el('p.bantuan', { teks: `…dan ${tanpaTarif.length - 8} lagi.` }) : null,
+    ]), { ya: 'Tetap simpan', tidak: 'Perbaiki dulu' })) return;
     const { bagian: porsi } = D.bagiHkPerBlok(blok, totalHk, inBagi.value);
     let jumlahBaris = 0;
     for (const e of dipilih) {
@@ -1183,6 +1195,11 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
   const inKomponen = pilihan(opsiKomponen(kategori, barisAda?.wage_component_id),
     barisAda?.wage_component_id, { saatUbah: () => perbarui() });
   const inQty = el('input', { type: 'number', step: '0.01', min: '0', nilai: barisAda?.qty ?? '' });
+  // Tarif BISA DIISI: komponen "Input Manual" tarifnya 0 di master, nilainya
+  // memang diketik per transaksi (sama seperti di aplikasi desktop).
+  const inTarif = el('input', { type: 'number', step: '500', min: '0' });
+  let tarifManual = false;
+  inTarif.addEventListener('input', () => { tarifManual = true; perbarui(); });
   const inDivisi = pilihan(opsiMaster('divisions', barisAda?.division_id ?? awal.division_id),
     barisAda?.division_id ?? awal.division_id, { saatUbah: () => isiBlok() });
   const inBlok = pilihan([], barisAda?.block_id ?? awal.block_id);
@@ -1201,11 +1218,19 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
 
   const perbarui = () => {
     const kom = D.cari('wage_components', inKomponen.value);
-    const tarif = barisAda?.tarif_snapshot ?? kom?.tarif ?? 0;
+    // isi tarif otomatis dari baris lama / tarif master, selama belum diketik sendiri
+    if (!tarifManual) {
+      const bawaan = Number(barisAda?.tarif_snapshot) || Number(kom?.tarif) || 0;
+      inTarif.value = bawaan || '';
+    }
+    const tarif = Number(inTarif.value) || 0;
     const q = Number(inQty.value) || 0;
-    hitungan.textContent = kom
-      ? `${angka(q, 2)} ${kom.satuan || ''} × ${rupiahPenuh(tarif)} = ${rupiahPenuh(q * tarif)}`
-      : 'Pilih komponen upah dulu.';
+    const satuan = kom?.satuan || (kategori === 'Lembur' ? 'jam' : 'satuan');
+    hitungan.textContent = !kom
+      ? 'Pilih komponen upah dulu.'
+      : !tarif
+        ? `Isi tarif per ${satuan} dulu — nilainya ikut tarif ini × jumlah.`
+        : `${angka(q, 2)} ${satuan} × ${rupiahPenuh(tarif)} = ${rupiahPenuh(Math.round(q * tarif))}`;
   };
   inQty.addEventListener('input', perbarui);
   perbarui();
@@ -1220,6 +1245,11 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
     if (!kom) salah.push('Komponen upah harus dipilih.');
     const q = Number(inQty.value);
     if (!(q > 0)) salah.push('Jumlah harus lebih dari 0.');
+    const tarifIsi = Number(inTarif.value);
+    if (!(tarifIsi > 0)) {
+      salah.push(`Tarif harus diisi (lebih dari 0). Komponen "${kom?.nama_komponen || '—'}" `
+        + 'tarifnya diketik per transaksi.');
+    }
     const blok = D.cari('blocks', inBlok.value);
     if (blok && inDivisi.value && String(blok.division_id) !== String(inDivisi.value)) {
       salah.push('Blok yang dipilih bukan bagian dari divisi itu.');
@@ -1227,7 +1257,7 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); badan.scrollTop = 0; return; }
 
-    const tarif = Number(barisAda?.tarif_snapshot ?? kom.tarif ?? 0);
+    const tarif = tarifIsi;
     const isi = {
       tanggal: inTanggal.value,
       employee_id: emp.id,
@@ -1267,7 +1297,12 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
     isian('Tanggal *', inTanggal),
     isian('Pekerja *', inKaryawan),
     isian('Komponen upah *', inKomponen),
-    isian('Jumlah *', inQty, { bantuan: 'Sesuai satuan komponen upah (ha, jam, hari, kg, …).' }),
+    el('div.baris-isian', {}, [
+      isian('Jumlah *', inQty, { bantuan: 'Sesuai satuan komponen (jam, hari, kg, …).' }),
+      isian('Tarif per satuan (Rp) *', inTarif, {
+        bantuan: 'Terisi otomatis kalau komponennya punya tarif tetap; untuk "Input Manual" diketik di sini.',
+      }),
+    ]),
     hitungan,
     pakaiBlok ? el('div.baris-isian', {}, [isian('Divisi', inDivisi), isian('Blok', inBlok)]) : null,
     isian('Catatan', inCatatan),

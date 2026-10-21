@@ -255,13 +255,35 @@ export async function pilihPengguna({ wajib = true } = {}) {
       // sengaja tidak membedakan nama tak terdaftar vs PIN keliru,
       // supaya nama pengguna tidak bisa ditebak-tebak dari layar ini
       kosongkan(tempatGalat).append(kesalahan(['Nama atau PIN salah.']));
+      tempatGalat.append(el('p.bantuan', {
+        teks: 'Nama harus persis seperti yang didaftarkan admin (huruf besar/kecil bebas). '
+          + 'Kalau akun Anda baru saja dibuat, daftar terbaru sudah diambil otomatis — '
+          + 'coba sekali lagi, atau muat ulang halaman (Ctrl+Shift+R).',
+      }));
       inPin.value = '';
       inNama.select();
     };
 
-    const masuk = async () => {
+    // Daftar pengguna di layar ini bisa saja tertinggal (akun baru dibuat admin
+    // setelah tab ini dibuka). Kalau nama tidak ketemu, ambil daftar terbaru
+    // dari GitHub sekali lalu coba lagi — supaya akun baru langsung bisa masuk.
+    let sudahSegarkan = false;
+    const segarkanDaftar = async () => {
+      if (sudahSegarkan || D.modeLokal() || D.state.belumDisimpan) return false;
+      sudahSegarkan = true;
+      try {
+        if (D.state.path === BAGIAN_INDUK) await D.muatUlang();
+        else { D.lupakanBagianLain(BAGIAN_INDUK); await muatPusat(); }
+        const baru = daftarPengguna().filter((x) => x.aktif !== false);
+        orang.length = 0; orang.push(...baru);
+        return true;
+      } catch { return false; }
+    };
+
+    const masuk = async (lagi = false) => {
       kosongkan(tempatGalat);
-      const cocok = orang.find((x) => norm(x.nama) === norm(inNama.value));
+      let cocok = orang.find((x) => norm(x.nama) === norm(inNama.value));
+      if (!cocok && !lagi && await segarkanDaftar()) { await masuk(true); return; }
       if (!cocok) { gagalMasuk(); return; }
       const p = semua()[cocok.id];
       if (p.pin) {
