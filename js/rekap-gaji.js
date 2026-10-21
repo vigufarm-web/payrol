@@ -13,7 +13,7 @@
 
 import * as D from './data.js';
 import { unduhXlsx, S } from './xlsx-tulis.js';
-import { el, pesan, panel, pilihan, isian } from './ui.js';
+import { el, pesan, panel, isian } from './ui.js';
 
 const rapiRek = (s) => String(s || '').replace(/\D/g, '');
 const fmtTgl = (iso) => iso;   // kepala kolom matriks memakai tanggal ISO, ringkas
@@ -294,26 +294,51 @@ export async function unduhRekapGaji(dari, sampai) {
 /** Dialog pilih periode lalu unduh. Dipanggil dari halaman Payroll. */
 export function dialogRekapGaji(periode) {
   const b = String(periode.bulan).padStart(2, '0');
+  const dd = (n) => String(n).padStart(2, '0');
   const akhirBulan = new Date(periode.tahun, periode.bulan, 0).getDate();
-  const opsi = [
-    { nilai: `${periode.tahun}-${b}-01|${periode.tahun}-${b}-15`, label: `Paruh 1 (1–15 ${b}/${periode.tahun})` },
-    { nilai: `${periode.tahun}-${b}-16|${periode.tahun}-${b}-${akhirBulan}`, label: `Paruh 2 (16–${akhirBulan} ${b}/${periode.tahun})` },
-    { nilai: `${periode.tahun}-${b}-01|${periode.tahun}-${b}-${akhirBulan}`, label: `Sebulan penuh (${b}/${periode.tahun})` },
-  ];
-  const pilih = pilihan(opsi, opsi[0].nilai);
-  pilih.querySelector('option[value=""]')?.remove();
-  pilih.value = opsi[0].nilai;
+  // Rentang tanggal BEBAS — gajian per 2 minggu tanggalnya tidak selalu sama.
+  const inDari = el('input', { type: 'date', nilai: `${periode.tahun}-${b}-01` });
+  const inSampai = el('input', { type: 'date', nilai: `${periode.tahun}-${b}-15` });
+  const catatan = el('p.bantuan', { teks: ' ' });
+  const hitungHari = () => {
+    const a = new Date(`${inDari.value}T00:00:00Z`);
+    const z = new Date(`${inSampai.value}T00:00:00Z`);
+    if (!inDari.value || !inSampai.value || Number.isNaN(+a) || Number.isNaN(+z)) {
+      catatan.textContent = 'Isi tanggal mulai dan tanggal akhir.'; return;
+    }
+    if (z < a) { catatan.textContent = 'Tanggal akhir tidak boleh sebelum tanggal mulai.'; return; }
+    const hari = Math.round((z - a) / 86400000) + 1;
+    catatan.textContent = `Rentang ${hari} hari.`;
+  };
+  inDari.addEventListener('change', hitungHari);
+  inSampai.addEventListener('change', hitungHari);
+  const pintasan = (label, dari, sampai) => el('button.tombol-samar.tombol-kecil', {
+    type: 'button', teks: label,
+    onclick: () => { inDari.value = dari; inSampai.value = sampai; hitungHari(); },
+  });
   const p = panel('Unduh Rekap Gaji (Excel)', el('div', {}, [
     el('p', { teks: 'Berisi 8 lembar: summary pembayaran, jobdesk, lampiran per divisi, '
       + 'detail harian (normal/lembur/premi), lembar penjualan kosong, dan peringatan HK. '
       + 'Lembur & premi yang belum di-acc TIDAK ikut dihitung.' }),
-    isian('Periode', pilih),
+    el('div.baris-isian', {}, [
+      isian('Dari tanggal *', inDari),
+      isian('Sampai tanggal *', inSampai),
+    ]),
+    catatan,
+    el('label', { style: 'display:block;font-size:.85rem;font-weight:600;margin:.6rem 0 .3rem',
+      teks: 'Pintasan periode' }),
+    el('div', { style: 'display:flex;flex-wrap:wrap;gap:.4rem' }, [
+      pintasan(`1–15 ${b}/${periode.tahun}`, `${periode.tahun}-${b}-01`, `${periode.tahun}-${b}-15`),
+      pintasan(`16–${akhirBulan} ${b}/${periode.tahun}`, `${periode.tahun}-${b}-16`, `${periode.tahun}-${b}-${dd(akhirBulan)}`),
+      pintasan(`Sebulan ${b}/${periode.tahun}`, `${periode.tahun}-${b}-01`, `${periode.tahun}-${b}-${dd(akhirBulan)}`),
+    ]),
   ]), [
     el('button.tombol-samar', { type: 'button', teks: 'Batal', onclick: () => p.tutup() }),
     el('button.tombol-utama', {
       type: 'button', teks: 'Unduh',
       onclick: async (e) => {
-        const [dari, sampai] = pilih.value.split('|');
+        const dari = inDari.value; const sampai = inSampai.value;
+        if (!dari || !sampai || sampai < dari) { hitungHari(); return; }
         e.target.disabled = true; e.target.textContent = 'Menyusun…';
         try {
           await unduhRekapGaji(dari, sampai);

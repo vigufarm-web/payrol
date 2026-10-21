@@ -820,7 +820,28 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
       return;
     }
 
-    for (const [divId, daftar] of perDivisi) {
+    // Satu lembur/premi yang dibagi ke banyak blok muncul sebagai beberapa
+    // baris. Di antrean ini dijadikan SATU baris (total semua bloknya) supaya
+    // kepala kebun tidak dibanjiri; keputusannya berlaku untuk segrupnya.
+    const kelompokkan = (daftar) => {
+      const peta = new Map();
+      for (const r of daftar) {
+        const kunci = [r._tabel, r.employee_id, r.tanggal, r.wage_component_id,
+          r.keterangan_manual || ''].join('|');
+        if (!peta.has(kunci)) peta.set(kunci, { ...r, _anggota: [r], _blok: new Set() });
+        else {
+          const g = peta.get(kunci);
+          g._anggota.push(r);
+          g.qty = (Number(g.qty) || 0) + (Number(r.qty) || 0);
+          g.nominal = (Number(g.nominal) || 0) + (Number(r.nominal) || 0);
+        }
+        if (r.block_id) peta.get(kunci)._blok.add(Number(r.block_id));
+      }
+      return [...peta.values()];
+    };
+
+    for (const [divId, daftarAsli] of perDivisi) {
+      const daftar = kelompokkan(daftarAsli);
       const divisi = divId ? D.labelRef('divisions', divId) : '(tanpa divisi)';
       const kepala = D.web().kebun?.[divId]?.kepala || '';
       const nilai = daftar.reduce((n, r) => n + (Number(r.nominal) || 0), 0);
@@ -846,7 +867,7 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
           if (!ok) return;
           sudahPin.add(divId);
         }
-        const daftarPutus = baris ? [baris] : daftar;
+        const daftarPutus = baris ? (baris._anggota || [baris]) : daftar.flatMap((x) => x._anggota || [x]);
         if (!baris) {
           const lanjut = await tanya(
             setuju ? `Setujui semua ${daftar.length} baris?` : `Tolak semua ${daftar.length} baris?`,
@@ -871,7 +892,7 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
         el('div.lembar-kepala', {}, [
           el('h2', { teks: divisi }),
           kepala ? el('span.lencana-mode', { teks: `Kepala: ${kepala}` }) : null,
-          el('span.status-sinkron', { teks: `${daftar.length} baris · ${rupiahPenuh(nilai)}` }),
+          el('span.status-sinkron', { teks: `${daftar.length} catatan · ${rupiahPenuh(nilai)}` }),
           el('button.tombol-samar.tombol-kecil', {
             type: 'button', teks: 'Tolak semua', onclick: () => putuskan(null, false),
           }),
@@ -884,7 +905,9 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
             { l: 'Jenis', k: '_label' },
             { l: 'Tanggal', k: 'tanggal', jenis: 'tanggal' },
             { l: 'Pekerja', nilai: (r) => D.labelRef('employees', r.employee_id) },
-            { l: 'Blok', nilai: (r) => (r.block_id ? D.labelRef('blocks', r.block_id) : '–') },
+            { l: 'Blok', nilai: (r) => (r._blok?.size > 1
+              ? `${r._blok.size} blok (dibagi)`
+              : (r.block_id ? D.labelRef('blocks', r.block_id) : '–')) },
             { l: 'Jumlah', nilai: (r) => `${angka(r.qty, 2)} ${r.satuan || ''}`.trim() },
             { l: 'Keterangan', nilai: (r) => r.keterangan_manual || r.catatan || '–' },
             { l: 'Nilai (Rp)', k: 'nominal', jenis: 'uang', total: true },

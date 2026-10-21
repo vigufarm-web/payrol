@@ -54,6 +54,18 @@ const jenisDiKegiatan = (activityId) => D.aktif('job_types')
 
 const hidup = (t) => D.baris(t).filter((r) => !r.deleted_at);
 
+/** Saring baris yang DITAMPILKAN sesuai divisi yang diceklis untuk pengguna
+ *  ini — admin melihat semua. Ini perapian tampilan (biar admin Pisang tidak
+ *  melihat input divisi Padi), bukan pengaman rahasia: datanya tetap satu
+ *  berkas terkunci. Baris tanpa divisi selalu ikut tampil. */
+function saringDivisi(baris) {
+  const boleh = P.divisiBoleh();
+  if (boleh === null) return baris;              // admin / tanpa pembatasan
+  const ok = new Set(boleh.map(Number));
+  return baris.filter((r) => r.division_id == null || ok.has(Number(r.division_id)));
+}
+
+
 const dalamPeriode = (r, periode) => {
   const [a, b] = periode.rentang();
   return r.tanggal >= a && r.tanggal <= b;
@@ -522,19 +534,45 @@ function formHK(barisAda, tgl, saatSelesai) {
       });
     }
 
-    // lembur & premi opsional — menempel SEKALI, di baris blok pertama
+    // Lembur & premi IKUT DIBAGI ke tiap blok, seperti HK-nya — supaya rekap
+    // biaya per blok betul. Pembagian memakai porsi HK tiap blok; sisa
+    // pembulatan ditaruh di blok terakhir supaya jumlahnya persis sama.
     let tambahan = 0;
+    let barisTambahan = 0;
+    const totalHkRencana = rencana.reduce((a, r) => a + Number(r.hk || 0), 0);
     for (const [bagian, namaTabel, prefix] of [
       [bagianLembur, 'lembur_transactions', 'LM'],
       [bagianPremi, 'premi_transactions', 'PR'],
     ]) {
       if (!bagian || !bagian.aktif()) continue;
-      const baru = D.tambah(namaTabel, {
-        ...bagian.isi(pertama),
-        nomor_transaksi: D.nomorBaru(namaTabel, prefix, tglNilai),
-        created_by: D.namaPengisi() || 'Web',
+      const dasar = bagian.isi(pertama);
+      const sasaran = barisAda ? [rencana[0]] : rencana;
+      // porsi rupiah & qty per blok (proporsional terhadap HK blok itu)
+      const nTotal = Number(dasar.nominal) || 0;
+      const qTotal = Number(dasar.qty) || 0;
+      const porsiRp = []; const porsiQty = [];
+      let sisaRp = nTotal; let sisaQty = qTotal;
+      sasaran.forEach((r, i) => {
+        const akhir = i === sasaran.length - 1;
+        const rasio = totalHkRencana > 0 ? Number(r.hk || 0) / totalHkRencana : 1 / sasaran.length;
+        const rp = akhir ? sisaRp : Math.round(nTotal * rasio);
+        const q = akhir ? Math.round(sisaQty * 10000) / 10000 : Math.round(qTotal * rasio * 10000) / 10000;
+        porsiRp.push(rp); porsiQty.push(q);
+        sisaRp -= rp; sisaQty -= q;
       });
-      D.tandaiMenunggu(namaTabel, baru.id);
+      sasaran.forEach((r, i) => {
+        if (!(porsiRp[i] > 0) && !(porsiQty[i] > 0)) return;
+        const baru = D.tambah(namaTabel, {
+          ...dasar,
+          block_id: Number(r.block_id),
+          qty: porsiQty[i],
+          nominal: porsiRp[i],
+          nomor_transaksi: D.nomorBaru(namaTabel, prefix, tglNilai),
+          created_by: D.namaPengisi() || 'Web',
+        });
+        D.tandaiMenunggu(namaTabel, baru.id);
+        barisTambahan++;
+      });
       tambahan++;
     }
 
@@ -592,7 +630,8 @@ function formHK(barisAda, tgl, saatSelesai) {
     bagianPremi ? bagianPremi.elemen : null,
     bagianLembur
       ? el('p.bantuan', { teks: 'Lembur & premi yang ditambahkan di sini menunggu persetujuan kepala kebun dulu '
-        + 'sebelum dihitung sebagai biaya; kalau bloknya banyak, catatannya menempel di blok pertama.' })
+        + 'sebelum dihitung sebagai biaya; kalau bloknya banyak, nilainya IKUT DIBAGI ke tiap blok '
+        + 'sesuai porsi HK-nya (jumlahnya tetap persis sama).' })
       : null,
     // saat MENGUBAH baris: lembur/premi orang ini pada tanggal ini ikut
     // ditampilkan — klik untuk revisi/hapus, atau tambah baru tanpa pindah menu
@@ -1102,7 +1141,7 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
   });
 
   const gambarIsi = () => {
-    const data = hidup('daily_payroll')
+    const data = saringDivisi(hidup('daily_payroll'))
       .filter((r) => r.tanggal === tgl)
       .sort((x, y) => D.labelRef('employees', x.employee_id)
         .localeCompare(D.labelRef('employees', y.employee_id), 'id'));
@@ -1114,13 +1153,15 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
       for (const r of hidup(tabelT)) {
         if (r.tanggal !== tgl) continue;
         const k = Number(r.employee_id);
-        if (!tambahan.has(k)) tambahan.set(k, { potongan: [], menunggu: false });
+        if (!tambahan.has(k)) tambahan.set(k, { potongan: [], menunggu: false, jumlah: 0 });
         const t = tambahan.get(k);
+        t.jumlah += Number(r.nominal) || 0;
         t.potongan.push(`${kode} ${rupiah(Number(r.nominal) || 0)}`);
         if (D.menungguPersetujuan(tabelT, r.id)) t.menunggu = true;
       }
     }
     const sudahTampil = new Set();
+    const dihitungTotal = new Set();
     const selTambahan = (r) => {
       const k = Number(r.employee_id);
       const t = tambahan.get(k);
@@ -1140,7 +1181,14 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
         { l: 'Jenis', nilai: (r) => D.labelRef('job_types', r.job_type_id) },
         { l: 'HK', k: 'hk', jenis: 'hk', total: true },
         { l: 'Upah (Rp)', k: 'nominal', jenis: 'uang', total: true },
-        { l: 'Lembur/Premi', nilai: selTambahan },
+        { l: 'Lembur/Premi (Rp)', nilai: selTambahan, jenis: 'uang', total: true,
+          // total = jumlah lembur+premi tanggal itu, dihitung sekali per pekerja
+          nilaiTotal: (r) => {
+            const k = Number(r.employee_id);
+            if (dihitungTotal.has(k)) return 0;
+            dihitungTotal.add(k);
+            return tambahan.get(k)?.jumlah || 0;
+          } },
       ], data, {
         kosong: `Belum ada HK pada ${ftanggal(tgl)}.`,
         saatKlik: bisaEdit() && !terkunci ? (r) => formHK(r, tgl, () => { gambarIsi(); gambar(); }) : null,
@@ -1334,7 +1382,7 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
 function lembarTransaksi(namaTabel, kategori, prefix, periode, gambar, bisaEdit) {
   const tempat = el('div');
   const gambarIsi = () => {
-    const data = hidup(namaTabel)
+    const data = saringDivisi(hidup(namaTabel))
       .filter((r) => dalamPeriode(r, periode))
       .sort((x, y) => String(x.tanggal).localeCompare(String(y.tanggal)));
     kosongkan(tempat).append(tabel([
@@ -1418,7 +1466,9 @@ export function halamanTerhapus({ gambar, bisaEdit }) {
   const gambarIsi = () => {
     const semua = [];
     for (const [t, judul] of Object.entries(TABEL_HAPUS)) {
-      for (const r of D.baris(t)) if (r.deleted_at) semua.push({ ...r, _tabel: t, _judul: judul });
+      for (const r of saringDivisi(D.baris(t))) {
+        if (r.deleted_at) semua.push({ ...r, _tabel: t, _judul: judul });
+      }
     }
     semua.sort((a, b) => String(b.deleted_at).localeCompare(String(a.deleted_at)));
 

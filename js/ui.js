@@ -185,7 +185,12 @@ export function tabel(kolom, data, { kosong = 'Belum ada data.', saatKlik = null
   const adaTotal = kolom.some((k) => k.total);
   const kaki = adaTotal ? el('tr.baris-total', {}, kolom.map((k, i) => {
     if (!k.total) return el(`td.${rata(k.jenis)}`, { teks: i === 0 ? 'Total' : '' });
-    const jml = data.reduce((n, r) => n + (Number(k.nilai ? k.nilai(r) : r[k.k]) || 0), 0);
+    // `nilaiTotal` dipakai kalau sel menampilkan teks (mis. "L 20.000 menunggu")
+    // tapi barisan TOTAL-nya tetap harus menjumlah angka.
+    const ambilAngka = (r) => (k.nilaiTotal
+      ? k.nilaiTotal(r)
+      : (k.nilai ? k.nilai(r) : r[k.k]));
+    const jml = data.reduce((n, r) => n + (Number(ambilAngka(r)) || 0), 0);
     return el(`td.${rata(k.jenis)}`, {
       teks: k.jenis === 'uang' ? rupiah(jml) : k.jenis === 'hk' ? hk(jml) : angka(jml, k.pecahan ?? 0),
     });
