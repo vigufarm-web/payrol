@@ -589,6 +589,44 @@ function formHK(barisAda, tgl, saatSelesai) {
       ? el('p.bantuan', { teks: 'Lembur & premi yang ditambahkan di sini menunggu persetujuan kepala kebun dulu '
         + 'sebelum dihitung sebagai biaya; kalau bloknya banyak, catatannya menempel di blok pertama.' })
       : null,
+    // saat MENGUBAH baris: lembur/premi orang ini pada tanggal ini ikut
+    // ditampilkan — klik untuk revisi/hapus, atau tambah baru tanpa pindah menu
+    barisAda ? (() => {
+      const daftar = [];
+      for (const [tb, kat, pre] of [['lembur_transactions', 'Lembur', 'LM'],
+        ['premi_transactions', 'Premi', 'PR']]) {
+        for (const r of D.baris(tb)) {
+          if (r.deleted_at || Number(r.employee_id) !== Number(barisAda.employee_id)
+            || r.tanggal !== barisAda.tanggal) continue;
+          const tunggu = D.menungguPersetujuan(tb, r.id);
+          daftar.push(el('button.tombol-samar.tombol-kecil', {
+            type: 'button',
+            teks: `${kat} ${rupiahPenuh(Number(r.nominal) || 0)} ${tunggu ? '⏳ menunggu acc' : '✓ di-acc'} — ubah/hapus`,
+            onclick: () => { p.tutup(); formNilai(tb, kat, pre, r, saatSelesai); },
+          }));
+        }
+      }
+      const awal = {
+        employee_id: barisAda.employee_id, tanggal: barisAda.tanggal,
+        division_id: barisAda.division_id, block_id: barisAda.block_id,
+      };
+      return el('div', { style: 'border-top:1px solid var(--garis-tipis);margin-top:1rem;padding-top:.8rem' }, [
+        el('label', { style: 'display:block;font-size:.85rem;font-weight:600;margin-bottom:.4rem',
+          teks: 'Lembur & premi pekerja ini pada tanggal ini' }),
+        daftar.length ? el('div', { style: 'display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem' }, daftar)
+          : el('p.bantuan', { teks: 'Belum ada.' }),
+        el('div', { style: 'display:flex;gap:.5rem' }, [
+          el('button.tombol-samar.tombol-kecil', {
+            type: 'button', teks: '+ Lembur',
+            onclick: () => { p.tutup(); formNilai('lembur_transactions', 'Lembur', 'LM', null, saatSelesai, { awal }); },
+          }),
+          el('button.tombol-samar.tombol-kecil', {
+            type: 'button', teks: '+ Premi',
+            onclick: () => { p.tutup(); formNilai('premi_transactions', 'Premi', 'PR', null, saatSelesai, { awal }); },
+          }),
+        ]),
+      ]);
+    })() : null,
   ]);
 
   isiBlok(); isiJenis(); perbarui();
@@ -603,6 +641,30 @@ function formHK(barisAda, tgl, saatSelesai) {
           `Baris ${barisAda.nomor_transaksi} masuk ke Data terhapus dan bisa dipulihkan lagi.`,
           { ya: 'Hapus', bahaya: true })) {
           D.hapus('daily_payroll', barisAda.id, { lunak: true });
+          // kalau itu HK terakhirnya hari itu, lembur/premi-nya jadi yatim —
+          // tawarkan ikut dihapus supaya tidak nyangkut di antrean persetujuan
+          const sisaHk = D.baris('daily_payroll').some((x) => !x.deleted_at
+            && Number(x.employee_id) === Number(barisAda.employee_id)
+            && x.tanggal === barisAda.tanggal);
+          if (!sisaHk) {
+            const terkait = [];
+            for (const [tb, label] of [['lembur_transactions', 'Lembur'], ['premi_transactions', 'Premi']]) {
+              for (const r of D.baris(tb)) {
+                if (!r.deleted_at && Number(r.employee_id) === Number(barisAda.employee_id)
+                  && r.tanggal === barisAda.tanggal) terkait.push({ tb, r, label });
+              }
+            }
+            if (terkait.length && await tanya('Ikut hapus lembur/preminya?', el('div', {}, [
+              el('p', { teks: `${D.labelRef('employees', barisAda.employee_id)} tidak punya HK lagi `
+                + `pada ${ftanggal(barisAda.tanggal)}, tapi masih tercatat:` }),
+              el('ul', {}, terkait.map((t) => el('li', {
+                teks: `${t.label} ${rupiahPenuh(Number(t.r.nominal) || 0)}${t.r.keterangan_manual ? ` — ${t.r.keterangan_manual}` : ''}`,
+              }))),
+              el('p', { teks: 'Hapus juga? (masuk Data terhapus, keluar dari antrean persetujuan)' }),
+            ]), { ya: 'Hapus juga', tidak: 'Biarkan' })) {
+              for (const t of terkait) D.hapus(t.tb, t.r.id, { lunak: true });
+            }
+          }
           pesan('Baris HK dihapus.', 'sukses');
           saatSelesai();
         }
@@ -1110,24 +1172,24 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
 // =====================================================================
 // BORONGAN / LEMBUR / PREMI — bentuk formnya sama
 // =====================================================================
-function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBlok = true } = {}) {
+function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBlok = true, awal = {} } = {}) {
   const tempatGalat = el('div');
   const hitungan = el('p.bantuan', { teks: ' ' });
 
-  const inTanggal = el('input', { type: 'date', nilai: barisAda?.tanggal || hariIni() });
+  const inTanggal = el('input', { type: 'date', nilai: barisAda?.tanggal || awal.tanggal || hariIni() });
   const inKaryawan = pilihanCari(
     D.aktif('employees').map((r) => ({ nilai: r.id, label: `${r.nama} (${r.nik})` })),
-    barisAda?.employee_id, { tempat: 'Ketik nama atau NIK…' });
+    barisAda?.employee_id ?? awal.employee_id, { tempat: 'Ketik nama atau NIK…' });
   const inKomponen = pilihan(opsiKomponen(kategori, barisAda?.wage_component_id),
     barisAda?.wage_component_id, { saatUbah: () => perbarui() });
   const inQty = el('input', { type: 'number', step: '0.01', min: '0', nilai: barisAda?.qty ?? '' });
-  const inDivisi = pilihan(opsiMaster('divisions', barisAda?.division_id), barisAda?.division_id,
-    { saatUbah: () => isiBlok() });
-  const inBlok = pilihan([], barisAda?.block_id);
+  const inDivisi = pilihan(opsiMaster('divisions', barisAda?.division_id ?? awal.division_id),
+    barisAda?.division_id ?? awal.division_id, { saatUbah: () => isiBlok() });
+  const inBlok = pilihan([], barisAda?.block_id ?? awal.block_id);
   const inCatatan = el('input', { type: 'text', nilai: barisAda?.catatan ?? '' });
 
   const isiBlok = () => {
-    const lama = inBlok.value;
+    const lama = inBlok.value || String(barisAda?.block_id ?? awal.block_id ?? '');
     kosongkan(inBlok).append(el('option', { value: '', teks: '— pilih —' }));
     for (const o of blokDiDivisi(inDivisi.value)) {
       const op = el('option', { value: o.nilai, teks: o.label });
