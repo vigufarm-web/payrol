@@ -3,6 +3,7 @@
 
 import * as D from './data.js';
 import * as gh from './github.js';
+import * as P from './pengguna.js';
 import {
   el, tabel, isian, kosongkan, pesan, tanya, waktu, angka, panel,
 } from './ui.js';
@@ -60,26 +61,62 @@ export function halamanSistem({ gambar, bisaEdit, muatUlangData }) {
         }),
       ]
       : bisaEdit()
-      ? [
-        el('p', { teks: 'Peramban ini boleh mengubah data dan menyimpannya kembali ke GitHub.' }),
-        el('div.baris-isian', {}, [
-          isian('Nama pengisi', el('input', {
-            type: 'text', nilai: D.namaPengisi(), placeholder: 'mis. Budi (kantor kebun)',
-            onchange: (e) => { D.setNamaPengisi(e.target.value); pesan('Nama disimpan.', 'sukses'); gambar(); },
-          }), { bantuan: 'Dicatat pada setiap penyimpanan.' }),
-        ]),
-        el('button.tombol-bahaya', {
-          type: 'button', teks: 'Keluar dari mode edit',
-          onclick: async () => {
-            if (!await tanya('Keluar dari mode edit?',
-              'Token dihapus dari peramban ini. Data tetap bisa dilihat.',
-              { ya: 'Keluar', bahaya: true })) return;
-            gh.simpanToken('');
-            pesan('Mode edit dimatikan.', 'sukses');
-            gambar();
-          },
-        }),
-      ]
+      ? (() => {
+        const dibagikan = !!D.web().token;
+        const bolehAtur = !P.adaPengguna() || P.siapa()?.admin === true;
+        return [
+          el('p', { teks: gh.adaTokenLokal()
+            ? 'Peramban ini boleh mengubah data dan menyimpannya kembali ke GitHub.'
+            : 'Mode edit aktif otomatis — admin sudah membagikan token lewat berkas data terenkripsi.' }),
+          el('div.baris-isian', {}, [
+            isian('Nama pengisi', el('input', {
+              type: 'text', nilai: D.namaPengisi(), placeholder: 'mis. Budi (kantor kebun)',
+              onchange: (e) => { D.setNamaPengisi(e.target.value); pesan('Nama disimpan.', 'sukses'); gambar(); },
+            }), { bantuan: 'Dicatat pada setiap penyimpanan.' }),
+          ]),
+          // berbagi token: cukup admin yang mengisi, yang lain otomatis
+          bolehAtur && gh.adaTokenLokal() && !dibagikan ? el('div', { style: 'margin:.6rem 0' }, [
+            el('button.tombol-samar', {
+              type: 'button', teks: 'Bagikan token ke semua admin',
+              onclick: () => {
+                D.setWeb((w) => { w.token = gh.ambilToken(); });
+                gh.setTokenBersama(gh.ambilToken());
+                pesan('Token ikut tersimpan terenkripsi di berkas data. Klik Simpan ke GitHub '
+                  + 'supaya berlaku — setelah itu semua admin otomatis mode edit.', 'sukses', 8);
+                gambar();
+              },
+            }),
+            el('p.bantuan', { teks: 'Token ikut dienkripsi bersama data, jadi hanya terbaca oleh '
+              + 'yang tahu password data. Admin lain tidak perlu menempel token lagi.' }),
+          ]) : null,
+          dibagikan ? el('p.bantuan', {
+            teks: 'Token sedang dibagikan ke semua admin lewat berkas data terenkripsi.',
+          }) : null,
+          bolehAtur && dibagikan ? el('button.tombol-samar', {
+            type: 'button', teks: 'Berhenti membagikan token',
+            onclick: async () => {
+              if (!await tanya('Berhenti membagikan token?',
+                'Admin lain kembali harus menempel token sendiri. Jangan lupa Simpan ke GitHub.',
+                { ya: 'Berhenti', bahaya: true })) return;
+              D.setWeb((w) => { delete w.token; });
+              gh.setTokenBersama('');
+              pesan('Token tidak lagi dibagikan. Klik Simpan ke GitHub supaya berlaku.', 'sukses', 7);
+              gambar();
+            },
+          }) : null,
+          gh.adaTokenLokal() ? el('button.tombol-bahaya', {
+            type: 'button', teks: 'Keluar dari mode edit',
+            onclick: async () => {
+              if (!await tanya('Keluar dari mode edit?',
+                'Token dihapus dari peramban ini. Data tetap bisa dilihat.',
+                { ya: 'Keluar', bahaya: true })) return;
+              gh.simpanToken('');
+              pesan('Mode edit dimatikan.', 'sukses');
+              gambar();
+            },
+          }) : null,
+        ];
+      })()
       : [
         el('p', { teks: 'Tanpa token, halaman ini hanya bisa menampilkan data. Untuk menambah atau mengubah data, masukkan token GitHub milik Anda. Token disimpan di peramban ini saja.' }),
         isian('Token GitHub', inToken),

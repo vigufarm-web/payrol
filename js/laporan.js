@@ -2,6 +2,8 @@
 // biaya per divisi/blok/kegiatan. Semua angka dihitung dari data di memori.
 
 import * as D from './data.js';
+import * as P from './pengguna.js';
+import { dialogRekapGaji } from './rekap-gaji.js';
 import { TABEL } from './skema-payroll.js';
 import {
   el, tabel, kosongkan, rupiah, rupiahPenuh, angka, hk as fhk, tanggal as ftanggal,
@@ -283,6 +285,11 @@ export function halamanPayroll({ periode }) {
             [...kolomDasar(), { l: 'Bank', k: 'bank' }, { l: 'No. rekening', k: 'rekening' }],
             data),
         }),
+        // rekap gaji resmi (8 lembar) — khusus admin yang pegang semua divisi
+        (!P.adaPengguna() || P.siapa()?.admin === true) ? el('button.tombol-utama.tombol-kecil', {
+          type: 'button', teks: 'Unduh Rekap Gaji (Excel)',
+          onclick: () => dialogRekapGaji(periode),
+        }) : null,
         el('button.tombol-samar', { type: 'button', teks: 'Cetak', onclick: () => window.print() }),
       ]),
       el('div.lembar-isi', {}, [

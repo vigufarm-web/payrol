@@ -35,6 +35,9 @@ export async function muatPusat() {
   try {
     const induk = await D.muatBagianLain(BAGIAN_INDUK);
     pusatCache = induk?.web?.pengguna || null;
+    // token yang dibagikan admin di bagian induk berlaku di semua bagian
+    const { setTokenBersama } = await import('./github.js');
+    if (induk?.web?.token && !D.web().token) setTokenBersama(induk.web.token);
   } catch { pusatCache = null; }
 }
 
@@ -242,25 +245,30 @@ export async function pilihPengguna({ wajib = true } = {}) {
 
   return new Promise((selesai) => {
     const tempatGalat = el('div');
-    const pilih = el('select', {}, [
-      el('option', { value: '', teks: '— pilih nama —' }),
-      ...orang.map((p) => el('option', { value: p.id, teks: p.nama })),
-    ]);
+    // nama DIKETIK, bukan dipilih dari daftar — supaya siapa saja yang punya
+    // akses tidak bisa dilihat orang lain dari layar masuk
+    const inNama = el('input', { type: 'text', autocomplete: 'off', spellcheck: false });
     const inPin = el('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off' });
+    const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+    const gagalMasuk = () => {
+      // sengaja tidak membedakan nama tak terdaftar vs PIN keliru,
+      // supaya nama pengguna tidak bisa ditebak-tebak dari layar ini
+      kosongkan(tempatGalat).append(kesalahan(['Nama atau PIN salah.']));
+      inPin.value = '';
+      inNama.select();
+    };
 
     const masuk = async () => {
       kosongkan(tempatGalat);
-      const p = semua()[pilih.value];
-      if (!p) { tempatGalat.append(kesalahan(['Pilih nama dulu.'])); return; }
+      const cocok = orang.find((x) => norm(x.nama) === norm(inNama.value));
+      if (!cocok) { gagalMasuk(); return; }
+      const p = semua()[cocok.id];
       if (p.pin) {
         const { hash } = await hashPin(inPin.value, p.pin.salt);
-        if (hash !== p.pin.hash) {
-          tempatGalat.append(kesalahan(['PIN salah.']));
-          inPin.value = ''; inPin.focus();
-          return;
-        }
+        if (hash !== p.pin.hash) { gagalMasuk(); return; }
       }
-      sessionStorage.setItem(KUNCI_SESI, pilih.value);
+      sessionStorage.setItem(KUNCI_SESI, cocok.id);
       // nama pengisi ikut nama pengguna, supaya jejak di tiap baris &
       // di commit GitHub konsisten dan tidak bisa diketik sembarangan
       D.setNamaPengisi(p.nama);
@@ -268,6 +276,7 @@ export async function pilihPengguna({ wajib = true } = {}) {
       selesai(true);
     };
     inPin.addEventListener('keydown', (e) => { if (e.key === 'Enter') masuk(); });
+    inNama.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); inPin.focus(); } });
 
     const tombol = [
       el('button.tombol-samar', {
@@ -279,15 +288,15 @@ export async function pilihPengguna({ wajib = true } = {}) {
 
     const pan = panel('Siapa yang mengisi?', el('div', {}, [
       tempatGalat,
-      el('p', { teks: 'Pilih nama Anda supaya tiap baris yang dibuat tercatat atas nama Anda, '
-        + 'dan divisi yang bukan bagian Anda tidak ikut terbuka untuk diubah.' }),
-      isian('Nama *', pilih),
+      el('p', { teks: 'Ketik nama Anda persis seperti yang didaftarkan, supaya tiap baris '
+        + 'tercatat atas nama Anda dan hanya divisi Anda yang terbuka untuk diubah.' }),
+      isian('Nama *', inNama),
       isian('PIN', inPin, { bantuan: 'Kosongkan kalau nama Anda belum dipasangi PIN.' }),
       el('p.bantuan', { teks: 'Kalau dilewati, situs tetap bisa dibuka untuk melihat laporan, '
         + 'tapi tidak ada yang bisa diinput atau direvisi.' }),
     ]), tombol);
 
-    setTimeout(() => pilih.focus(), 50);
+    setTimeout(() => inNama.focus(), 50);
   });
 }
 

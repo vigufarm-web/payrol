@@ -36,7 +36,14 @@ export function setLokasiRepo(owner, repo, branch = 'main') {
   localStorage.setItem(KUNCI_REPO, JSON.stringify({ owner, repo, branch }));
 }
 
-export const ambilToken = () => localStorage.getItem(KUNCI_TOKEN) || '';
+// Token bersama: admin bisa menyimpan token DI DALAM berkas data terenkripsi,
+// sehingga admin lain otomatis masuk mode edit tanpa menempel token sendiri.
+// Diisikan oleh data.js setiap kali berkas data berhasil dibuka.
+let tokenBersama = '';
+export const setTokenBersama = (t) => { tokenBersama = String(t || '').trim(); };
+
+export const adaTokenLokal = () => !!localStorage.getItem(KUNCI_TOKEN);
+export const ambilToken = () => localStorage.getItem(KUNCI_TOKEN) || tokenBersama || '';
 export const simpanToken = (t) => {
   if (t) localStorage.setItem(KUNCI_TOKEN, t.trim());
   else localStorage.removeItem(KUNCI_TOKEN);

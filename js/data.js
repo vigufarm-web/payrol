@@ -252,6 +252,8 @@ export async function muat(password, path = state.path) {
   state.sha = sha;
   state.password = password;
   state.belumDisimpan = false;
+  // token bersama (kalau admin menyimpannya di berkas) langsung berlaku
+  gh.setTokenBersama(data.web?.token || '');
   return data;
 }
 
