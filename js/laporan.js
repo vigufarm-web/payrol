@@ -148,16 +148,9 @@ async function tempelAlatBerat(tempat, per) {
     premi += nol(r.premi);
     unit.add(Number(r.unit_id));
   }
-  let solar = 0; let servis = 0; let liter = 0;
-  for (const r of alat.tabel.fuel_logs || []) {
-    if (r.deleted_at || r.tanggal < dari || r.tanggal > sampai) continue;
-    liter += nol(r.liter); solar += nol(r.liter) * nol(r.harga_liter);
-  }
-  for (const r of alat.tabel.service_logs || []) {
-    if (r.deleted_at || r.tanggal < dari || r.tanggal > sampai) continue;
-    servis += nol(r.biaya);
-  }
-  if (!unit.size && !solar && !servis) { tempatAlat.remove(); return; }
+  // Tanpa log kerja yang sudah di-acc, tidak ada upah operator untuk
+  // ditampilkan — bagiannya dilewati saja daripada memajang nol.
+  if (!unit.size) { tempatAlat.remove(); return; }
 
   taruh(tempatAlat, el('div.lembar', {}, [
     el('div.lembar-kepala', {}, [el('h2', { teks: 'Alat Berat & Kendaraan' })]),
@@ -166,16 +159,18 @@ async function tempelAlatBerat(tempat, per) {
         { l: 'Jenis', k: 'jenis' },
         { l: 'Nilai (Rp)', k: 'nilai', jenis: 'uang', total: true },
       ], [
+        // Hanya upah & premi operator. Solar dan servis sengaja TIDAK ikut —
+        // itu biaya unit, bukan upah orang, dan tempatnya di laporan bagian
+        // Alat Berat & Kendaraan sendiri.
         { jenis: 'Upah operator', nilai: Math.round(upah) },
         { jenis: 'Premi operator', nilai: Math.round(premi) },
-        { jenis: 'Solar', nilai: Math.round(solar) },
-        { jenis: 'Servis & perbaikan', nilai: Math.round(servis) },
       ], { kosong: 'Belum ada kegiatan unit pada periode ini.' }),
       el('p.bantuan', {
         teks: `${unit.size} unit beroperasi · ${angka(hkOp, 2)} HK operator · `
-          + `${angka(hm, 1)} HM · ${angka(km, 1)} KM · ${angka(liter, 1)} liter solar. `
+          + `${angka(hm, 1)} HM · ${angka(km, 1)} KM. `
           + 'Angka ini TIDAK ikut dijumlahkan ke "Total upah" di atas — itu khusus '
-          + 'pekerja kebun. Log yang belum di-acc belum dihitung.',
+          + 'pekerja kebun. Log yang belum di-acc belum dihitung. Biaya solar & servis '
+          + 'ada di Laporan ALB & Kendaraan, bukan di sini.',
       }),
     ]),
   ]));

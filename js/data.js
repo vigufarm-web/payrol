@@ -407,18 +407,45 @@ const rapiNama = (n) => String(n || '').trim().toLowerCase().replace(/\s+/g, ' '
 const rapiRek = (r) => String(r || '').replace(/[^0-9]/g, '');
 
 /**
- * Peta HK per orang per tanggal dari SEMUA bagian payroll LAIN di repo ini
- * (mis. dari bagian Padi+Infra: membaca bagian Pisang). Kuncinya nama +
- * nomor rekening, karena nama saja banyak yang kembar.
+ * Peta HK per orang per tanggal dari SEMUA bagian LAIN di repo ini —
+ * bagian payroll lain (mis. dari Padi+Infra: membaca Pisang) MAUPUN bagian
+ * Alat Berat (hari kerja operator). Kuncinya nama + nomor rekening, karena
+ * nama saja banyak yang kembar.
+ *
+ * Tujuannya satu: mencegah satu orang dibayar dua kali pada hari yang sama
+ * dari dua bagian berbeda.
  */
 export async function petaHkBagianLain() {
   const per = [];   // [{ nama, rek, bagian, perTanggal: {tgl: hk} }]
   const dataset = state.daftar?.dataset || {};
   for (const [path, meta] of Object.entries(dataset)) {
-    if (path === state.path || meta?.aplikasi !== 'PayrollHK') continue;
+    if (path === state.path) continue;
     const lain = await muatBagianLain(path);
     if (!lain?.tabel) continue;
     const label = meta.label || path;
+
+    // Bagian Alat Berat: orangnya ada di tabel `operators`, hari kerjanya di
+    // `work_logs`. Beberapa orang terdaftar DI DUA TEMPAT — sebagai pekerja
+    // kebun sekaligus operator — jadi tanpa ini, satu orang bisa dibayar
+    // HK kebun dan upah operator pada hari yang sama tanpa ada yang menegur.
+    if ((lain.aplikasi || meta?.aplikasi) === 'AlatBerat') {
+      const op = new Map();
+      for (const o of lain.tabel.operators || []) {
+        op.set(Number(o.id), { nama: rapiNama(o.nama), rek: rapiRek(o.no_rekening),
+          asli: o.nama, bagian: label, perTanggal: {} });
+      }
+      for (const r of lain.tabel.work_logs || []) {
+        if (r.deleted_at) continue;
+        const c = lain.web?.persetujuan?.work_logs?.[String(r.id)];
+        if (c && c.status !== 'disetujui') continue;     // belum di-acc: belum dihitung
+        const o = op.get(Number(r.operator_id));
+        if (!o) continue;
+        o.perTanggal[r.tanggal] = (o.perTanggal[r.tanggal] || 0) + (Number(r.hk) || 0);
+      }
+      for (const o of op.values()) if (Object.keys(o.perTanggal).length) per.push(o);
+      continue;
+    }
+    if ((lain.aplikasi || meta?.aplikasi) !== 'PayrollHK') continue;
     const orang = new Map();
     for (const e of lain.tabel.employees || []) {
       orang.set(Number(e.id), { nama: rapiNama(e.nama), rek: rapiRek(e.rekening),

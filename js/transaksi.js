@@ -218,6 +218,10 @@ function bagianTambahan(kategori, satuanBawaan) {
 function formHK(barisAda, tgl, saatSelesai) {
   const tempatGalat = el('div');
   const hitungan = el('p.bantuan.hitungan-hk', { teks: ' ' });
+  // Peringatan "sudah bekerja di tempat lain hari itu" — tampil DI FORM,
+  // sebelum disimpan, supaya pengisi tahu sisanya tinggal berapa. Yang
+  // melewati batas HK ditolak saat menyimpan; yang masih muat tetap boleh.
+  const catatanLintas = el('div');
 
   const inTanggal = el('input', { type: 'date', nilai: barisAda?.tanggal || tgl || hariIni() });
   const inKaryawan = pilihanCari(
@@ -432,6 +436,52 @@ function formHK(barisAda, tgl, saatSelesai) {
         + `Tarif ${rupiahPenuh(tarif)} × ${fhk(totalHk)} HK = ${rupiahPenuh(nominal)}`
         + `  ·  HK terpakai hari itu: ${fhk(terpakai)} dari ${fhk(D.maksHkPerHari())}`
       : 'Pilih pekerja dulu untuk melihat perhitungan upahnya.';
+    perbaruiCatatanLintas(emp);
+  };
+
+  /** Di mana saja orang ini sudah tercatat pada tanggal itu — divisi lain di
+   *  berkas ini, maupun bagian lain (alat berat / payroll sebelah). */
+  let kunciLintasTerakhir = '';
+  const perbaruiCatatanLintas = (emp) => {
+    const kunci = `${emp?.id || ''}|${inTanggal.value}|${inDivisi.value}`;
+    if (kunci === kunciLintasTerakhir) return;
+    kunciLintasTerakhir = kunci;
+    kosongkan(catatanLintas);
+    if (!emp || !inTanggal.value) return;
+
+    const batas = D.maksHkPerHari();
+    const divIni = Number(inDivisi.value) || 0;
+    const perDiv = D.hkHariPerDivisi(emp.id, inTanggal.value, barisAda?.id);
+    const tempatLain = [...perDiv.entries()]
+      .filter(([d, v]) => d !== divIni && v > 0)
+      .map(([d, v]) => `${fhk(v)} HK di ${d ? D.labelRef('divisions', d) : '(tanpa divisi)'}`);
+
+    const gambarCatatan = (daftar, hkLain) => {
+      kosongkan(catatanLintas);
+      if (!daftar.length) return;
+      const sisa = Math.round((batas - hkLain) * 10000) / 10000;
+      catatanLintas.append(el('div.petunjuk', { role: 'status' }, [
+        el('strong', { teks: `${emp.nama} hari itu sudah bekerja di tempat lain.` }),
+        el('p', { style: 'margin:.25rem 0 0',
+          teks: `Tercatat ${daftar.join(', ')}. Sisa jatah hari itu ${fhk(Math.max(0, sisa))} HK `
+            + `dari ${fhk(batas)} — lebih dari itu tidak bisa disimpan.` }),
+      ]));
+    };
+    gambarCatatan(tempatLain, tempatLain.length
+      ? [...perDiv.entries()].filter(([d]) => d !== divIni).reduce((n, [, v]) => n + v, 0) : 0);
+
+    // bagian lain dibaca dari berkas sebelah — datang belakangan, tempelkan
+    // begitu siap (tanggal/pekerja boleh saja sudah berganti, karena itu
+    // kuncinya diperiksa ulang)
+    petaLintas().then((peta) => {
+      if (kunci !== kunciLintasTerakhir) return;
+      const l = D.hkLintas(peta, emp, inTanggal.value);
+      const semua = [...tempatLain];
+      let hkLain = [...perDiv.entries()]
+        .filter(([d]) => d !== divIni).reduce((n, [, v]) => n + v, 0);
+      if (l) { semua.push(`${fhk(l.hk)} HK di bagian ${l.bagian}`); hkLain += l.hk; }
+      gambarCatatan(semua, hkLain);
+    }).catch(() => {});
   };
   inHk.addEventListener('input', () => {
     if (!barisAda && blokTerpilih().length >= 2 && !pernahManual) bagiOtomatis(modeBagi);
@@ -525,17 +575,26 @@ function formHK(barisAda, tgl, saatSelesai) {
         salah.push(`Total HK ${emp.nama} di divisi ini pada ${ftanggal(tglNilai)} jadi `
           + `${fhk(diDivisiIni + totalBaru)}, melebihi batas ${fhk(D.maksHkPerHari())} per hari.`);
       } else if (total > D.maksHkPerHari() + 1e-9) {
-        // Divisi BERBEDA: memang bisa terjadi (pagi di Padi, sore di Pisang) —
-        // jangan ditolak, tapi admin yang menginput terakhir harus diberi tahu.
-        bedaDivisi = { daftar: diDivisiLain, hkLain, total };
+        // Divisi BERBEDA. Saling bantu antar divisi wajar SELAMA sehari tidak
+        // lebih dari batas HK; begitu lewat, upahnya dobel — ditolak, dan
+        // pengisi diberi tahu persis di divisi mana HK-nya sudah tercatat.
+        salah.push(`${emp.nama} sudah tercatat `
+          + diDivisiLain.map((x) => `${fhk(x.hk)} HK di ${x.divisi}`).join(', ')
+          + ` pada ${ftanggal(tglNilai)}. Ditambah ${fhk(totalBaru)} HK dari input ini jadi `
+          + `${fhk(total)} — melebihi batas ${fhk(D.maksHkPerHari())} per hari. Kurangi dulu `
+          + 'HK di divisi satunya kalau memang orangnya pindah ke sini.');
       }
-      // anti dobel input ANTAR BAGIAN: orang yang sama (nama + rekening)
-      // mungkin sudah dicatat admin bagian lain di tanggal itu
+      // Antar BAGIAN (mis. kebun <-> alat berat): orang yang sama (nama +
+      // rekening) mungkin sudah dicatat admin bagian lain di tanggal itu.
+      // Saling bantu antar bagian itu wajar, jadi TIDAK ditolak — yang
+      // dijaga cuma satu: jangan sampai sehari lebih dari batas HK.
       lintas = D.hkLintas(await petaLintas(), emp, tglNilai);
       if (lintas && lintas.hk + total > D.maksHkPerHari() + 1e-9) {
         salah.push(`${emp.nama} sudah tercatat ${fhk(lintas.hk)} HK pada ${ftanggal(tglNilai)} `
-          + `di bagian ${lintas.bagian}${lintas.lemah ? ' (dicocokkan dari nama — rekening kosong)' : ''}. `
-          + `Ditambah input ini totalnya jadi ${fhk(lintas.hk + total)} — dobel input antar divisi.`);
+          + `di bagian ${lintas.bagian}`
+          + `${lintas.lemah ? ' (dicocokkan dari nama — rekening kosong)' : ''}. `
+          + `Ditambah input ini jadi ${fhk(lintas.hk + total)} — melebihi batas `
+          + `${fhk(D.maksHkPerHari())} per hari. Kurangi dulu HK di bagian satunya.`);
       }
     }
 
@@ -545,32 +604,13 @@ function formHK(barisAda, tgl, saatSelesai) {
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); badan.scrollTop = 0; return; }
 
-    // Orang yang sama sudah punya HK di DIVISI LAIN pada hari itu. Boleh
-    // diteruskan (memang kerja di dua divisi), tapi jangan diam-diam —
-    // yang menginput terakhir yang melihat peringatan ini.
-    if (bedaDivisi) {
-      const rinci = bedaDivisi.daftar
-        .map((x) => `${x.divisi} ${fhk(x.hk)} HK`).join(', ');
-      const lanjut = await tanya(`${emp.nama} sudah punya HK hari itu di divisi lain`, el('div', {}, [
-        el('p', { teks: `Pada ${ftanggal(tglNilai)} ${emp.nama} sudah tercatat di ${rinci}. `
-          + `Ditambah ${fhk(totalBaru)} HK dari input ini, totalnya jadi `
-          + `${fhk(bedaDivisi.total)} — di atas batas ${fhk(D.maksHkPerHari())} per hari.` }),
-        el('p', { teks: 'Kalau memang orangnya kerja di dua divisi pada hari itu, lanjutkan. '
-          + 'Kalau tidak, upahnya akan terhitung dobel — kurangi HK-nya atau hubungi admin '
-          + 'divisi satunya dulu.' }),
-      ]), { ya: 'Memang kerja dua divisi — simpan', tidak: 'Perbaiki dulu' });
-      if (!lanjut) return;
-    }
-
-    // masih muat di bawah batas, tapi orangnya sudah ada kerjaan di bagian lain:
-    // beri tahu dulu, jangan diam-diam
+    // Sudah ada kerjaan di bagian lain hari itu dan masih di bawah batas:
+    // itu wajar (saling bantu antar bagian), jadi jalan terus — cukup
+    // diberi tahu sekilas. Yang melewati batas sudah ditolak di atas.
     if (lintas) {
-      const lanjut = await tanya(`Sudah ada kerjaan di ${lintas.bagian}`,
-        `${emp.nama} sudah tercatat ${fhk(lintas.hk)} HK pada ${ftanggal(tglNilai)} di bagian `
-        + `${lintas.bagian}${lintas.lemah ? ' (dicocokkan dari nama — rekening kosong)' : ''}. `
-        + 'Yakin memang kerja di dua bagian pada hari itu?',
-        { ya: 'Tetap simpan', tidak: 'Batal' });
-      if (!lanjut) return;
+      const asal = `${lintas.bagian}${lintas.lemah ? ' (dicocokkan dari nama — rekening kosong)' : ''}`;
+      pesan(`${emp.nama} juga tercatat ${fhk(lintas.hk)} HK di bagian ${asal} pada tanggal itu `
+        + `— total ${fhk(lintas.hk + totalBaru)} HK, masih dalam batas.`, 'info', 7);
     }
 
     const tarif = Number(barisAda?.tarif_hk_snapshot) || Number(emp.tarif_hk) || 0;
@@ -704,6 +744,7 @@ function formHK(barisAda, tgl, saatSelesai) {
     }),
     tempatTabelBlok,
     hitungan,
+    catatanLintas,
     isian('Keterangan pekerjaan', inJob),
     isian('Catatan', inCatatan),
     bagianLembur ? bagianLembur.elemen : null,
@@ -1003,6 +1044,15 @@ function formMassal(tgl, saatSelesai) {
         + lewatBatas.slice(0, 5).map((e) => e.nama).join(', ')
         + (lewatBatas.length > 5 ? ', dan lainnya' : '') + '.');
     }
+    // sudah punya HK di divisi lain sampai lewat batas -> ditolak juga
+    if (bedaDivisiMassal.length) {
+      salah.push(`${bedaDivisiMassal.length} pekerja sudah punya HK di divisi lain pada tanggal `
+        + `itu sehingga totalnya lewat ${fhk(D.maksHkPerHari())} HK: `
+        + bedaDivisiMassal.slice(0, 5)
+          .map((b) => `${b.e.nama} (${fhk(b.hkLain)} HK di ${b.divisi})`).join(', ')
+        + (bedaDivisiMassal.length > 5 ? ', dan lainnya' : '')
+        + '. Kurangi dulu HK di divisi satunya.');
+    }
     // anti dobel input antar bagian (nama + rekening)
     const peta = await petaLintas();
     const bentrok = [];
@@ -1010,36 +1060,26 @@ function formMassal(tgl, saatSelesai) {
       const l = D.hkLintas(peta, e, inTanggal.value);
       if (l) bentrok.push({ e, l, lewat: l.hk + D.totalHkHari(e.id, inTanggal.value) + totalHk > D.maksHkPerHari() + 1e-9 });
     }
-    for (const b of bentrok.filter((x) => x.lewat)) {
-      salah.push(`${b.e.nama} sudah tercatat ${fhk(b.l.hk)} HK di bagian ${b.l.bagian} `
-        + 'pada tanggal itu — input ini membuatnya dobel.');
+    const lewatBentrok = bentrok.filter((x) => x.lewat);
+    if (lewatBentrok.length) {
+      salah.push(`${lewatBentrok.length} pekerja sudah tercatat di bagian lain pada tanggal itu `
+        + `sehingga totalnya lewat ${fhk(D.maksHkPerHari())} HK: `
+        + lewatBentrok.slice(0, 5)
+          .map((b) => `${b.e.nama} (${fhk(b.l.hk)} HK di ${b.l.bagian})`).join(', ')
+        + (lewatBentrok.length > 5 ? ', dan lainnya' : '')
+        + '. Kurangi dulu HK di bagian satunya.');
     }
 
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); badan.scrollTop = 0; return; }
 
-    if (bedaDivisiMassal.length) {
-      const lanjut = await tanya(`${bedaDivisiMassal.length} pekerja sudah punya HK hari itu di divisi lain`,
-        el('div', {}, [
-          el('p', { teks: bedaDivisiMassal.slice(0, 6)
-            .map((b) => `${b.e.nama}: ${fhk(b.hkLain)} HK di ${b.divisi} → jadi ${fhk(b.total)}`)
-            .join('. ') + (bedaDivisiMassal.length > 6
-            ? `, dan ${bedaDivisiMassal.length - 6} lagi.` : '.') }),
-          el('p', { teks: `Totalnya di atas batas ${fhk(D.maksHkPerHari())} per hari. Lanjutkan hanya `
-            + 'kalau orangnya memang kerja di dua divisi pada hari itu — kalau tidak, upahnya dobel.' }),
-        ]),
-        { ya: 'Memang kerja dua divisi — simpan', tidak: 'Perbaiki dulu' });
-      if (!lanjut) return;
-    }
 
+    // Yang lewat batas sudah DITOLAK di atas. Sisanya masih dalam batas —
+    // saling bantu antar bagian itu wajar, cukup diberi tahu sekilas.
     const sisaBentrok = bentrok.filter((x) => !x.lewat);
     if (sisaBentrok.length) {
-      const lanjut = await tanya('Sudah ada kerjaan di bagian lain',
-        sisaBentrok.slice(0, 6).map((b) => `${b.e.nama}: ${fhk(b.l.hk)} HK di ${b.l.bagian}`).join('. ')
-        + (sisaBentrok.length > 6 ? `, dan ${sisaBentrok.length - 6} lagi.` : '.')
-        + ' Yakin memang kerja di dua bagian pada hari itu?',
-        { ya: 'Tetap simpan', tidak: 'Batal' });
-      if (!lanjut) return;
+      pesan(`${sisaBentrok.length} pekerja juga tercatat di bagian lain pada tanggal itu, `
+        + 'masih dalam batas HK.', 'info', 7);
     }
 
     const tanpaTarif = dipilih.filter((e) => !(Number(e.tarif_hk) > 0));

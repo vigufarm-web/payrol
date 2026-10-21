@@ -367,6 +367,36 @@ function formLog(barisAda, tglAwal, saatSelesai) {
       ]), { ya: 'Tetap simpan', tidak: 'Perbaiki dulu' });
       if (!lanjut) return;
     }
+    // ---- Anti upah dobel LINTAS BAGIAN.
+    // Beberapa orang terdaftar sebagai operator SEKALIGUS pekerja kebun.
+    // Tanpa pemeriksaan ini, satu orang bisa dibayar HK kebun dan HK operator
+    // pada hari yang sama tanpa ada yang menegur — dan itu pernah terjadi.
+    const op = D.cari('operators', opId);
+    if (op && totalHk > 0) {
+      const peta = await D.petaHkBagianLain().catch(() => []);
+      const lintas = D.hkLintas(peta, { nama: op.nama, rekening: op.no_rekening },
+        inTanggal.value);
+      if (lintas) {
+        const batas = D.maksHkPerHari();
+        const jumlah = lintas.hk + totalHk;
+        const lanjut = await tanya(
+          jumlah > batas + 1e-9 ? `${op.nama} jadi lebih dari ${fhk(batas)} HK hari itu`
+            : `${op.nama} sudah punya HK di bagian lain hari itu`,
+          el('div', {}, [
+            el('p', { teks: `Pada ${ftanggal(inTanggal.value)} ${op.nama} sudah tercatat `
+              + `${fhk(lintas.hk)} HK di bagian ${lintas.bagian}`
+              + `${lintas.lemah ? ' (dicocokkan dari nama — rekening kosong)' : ''}. `
+              + `Ditambah ${fhk(totalHk)} HK dari log ini, totalnya jadi ${fhk(jumlah)}.` }),
+            el('p', { teks: jumlah > batas + 1e-9
+              ? 'Kalau memang hari itu dia membantu di alat berat, pastikan HK kebunnya '
+                + 'sudah dikurangi atau dihapus — kalau tidak, upahnya terhitung dobel.'
+              : 'Pastikan memang begitu pembagian harinya.' }),
+          ]),
+          { ya: 'Sudah benar — simpan', tidak: 'Perbaiki dulu', bahaya: jumlah > batas + 1e-9 });
+        if (!lanjut) return;
+      }
+    }
+
     // keterangan pemakaian luar kebun ikut tersimpan di catatan (sekali saja)
     for (const ket of luar) {
       if (!inCatatan.value.includes(ket)) {
@@ -1013,61 +1043,34 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
     const servis = D.baris('service_logs').filter(dalam);
     const biayaServis = servis.reduce((n, x) => n + (Number(x.biaya) || 0), 0);
 
-    // ---- HK divisi Infrastruktur, dibaca dari bagian Payroll (hanya baca)
-    let infra = null;
-    const lain = await D.muatBagianLain('data/payroll.json');
-    if (lain?.tabel) {
-      const t = lain.tabel;
-      const div = (t.divisions || []).find((d) => /infra/i.test(String(d.nama_divisi || '')));
-      if (div) {
-        const hidup = (n) => (t[n] || []).filter((x) => !x.deleted_at);
-        const pas = (x) => x.tanggal >= r.dari && x.tanggal <= r.sampai
-          && Number(x.division_id) === Number(div.id);
-        const acc = (tab, id) => {
-          const c = lain.web?.persetujuan?.[tab]?.[String(id)];
-          return !c || c.status === 'disetujui';
-        };
-        const hk = hidup('daily_payroll').filter(pas);
-        const borongan = hidup('borongan_transactions').filter(pas);
-        const lembur = hidup('lembur_transactions').filter((x) => pas(x) && acc('lembur_transactions', x.id));
-        const premiP = hidup('premi_transactions').filter((x) => pas(x) && acc('premi_transactions', x.id));
-        const jml = (a) => a.reduce((n, x) => n + (Number(x.nominal) || 0), 0);
-        infra = {
-          hk: hk.reduce((n, x) => n + (Number(x.hk) || 0), 0),
-          upahHk: jml(hk),
-          lain: jml(borongan) + jml(lembur) + jml(premiP),
-        };
-      }
-    }
-
-    const total = (infra ? infra.upahHk + infra.lain : 0)
-      + upahHkOp + upahJam + premiOp + biayaSolar + biayaServis;
-    const totalHk = (infra?.hk || 0) + totalHkOp;
-    const upahHkGabungan = (infra?.upahHk || 0) + upahHkOp;
+    // Laporan ini KHUSUS alat berat & kendaraan. Upah pekerja divisi
+    // Infrastruktur sengaja TIDAK ikut dihitung di sini — tempatnya di
+    // Laporan Kebun, dengan targetnya sendiri. Kalau ikut dihitung di sini,
+    // upah yang sama dinilai terhadap DUA target sekaligus.
+    const total = upahHkOp + upahJam + premiOp + biayaSolar + biayaServis;
+    const totalHk = totalHkOp;
+    const upahHkGabungan = upahHkOp;
     const target = targetKini();
     const persen = target ? Math.round((total / target) * 1000) / 10 : null;
 
     kosongkan(tempatBiaya).append(el('div.lembar', {}, [
-      el('div.lembar-kepala', {}, [el('h2', { teks: `Biaya divisi Infrastruktur — ${r.label}` })]),
+      el('div.lembar-kepala', {}, [el('h2', { teks: `Biaya alat berat & kendaraan — ${r.label}` })]),
       el('div.lembar-isi', {}, [
         tabel([
           { l: 'Jenis biaya', k: 'jenis' },
           { l: 'Jumlah', k: 'jumlah' },
           { l: 'Nilai (Rp)', k: 'rp', jenis: 'uang', total: true },
         ], [
-          ...(infra ? [
-            { jenis: 'HK Infrastruktur (bagian Payroll)', jumlah: `${fhk(infra.hk)} HK`, rp: infra.upahHk },
-            { jenis: 'Borongan, lembur & premi Infra (Payroll, disetujui)', jumlah: '', rp: infra.lain },
-          ] : []),
           { jenis: 'Upah HK operator', jumlah: `${fhk(totalHkOp)} HK`, rp: upahHkOp },
           { jenis: 'Upah jam / lembur operator (HM × tarif jam)', jumlah: `${angka(totalJam, 1)} jam`, rp: upahJam },
           { jenis: 'Premi operator (disetujui)', jumlah: `${log.length} log`, rp: premiOp },
           { jenis: 'Solar', jumlah: '', rp: biayaSolar },
           { jenis: 'Servis', jumlah: `${servis.length} kali`, rp: biayaServis },
         ], { kosong: 'Belum ada biaya.' }),
-        infra ? null : el('p.bantuan', {
-          teks: 'Bagian Payroll tidak terbaca (berkas belum ada, atau passwordnya berbeda) — '
-            + 'biaya HK Infrastruktur belum ikut dihitung di sini.',
+        el('p.bantuan', {
+          teks: 'Khusus alat berat & kendaraan. Upah pekerja divisi Infrastruktur TIDAK ikut '
+            + 'dihitung di sini — itu ada di Laporan Kebun dengan targetnya sendiri, supaya '
+            + 'upah yang sama tidak dinilai terhadap dua target sekaligus.',
         }),
         target == null
           ? el('p.bantuan', { teks: 'Target periode ini belum diisi — klik "Atur target" '
@@ -1194,9 +1197,10 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
       const inP1 = el('input', { type: 'number', step: '100000', min: '0', nilai: t.paruh1 || '' });
       const inP2 = el('input', { type: 'number', step: '100000', min: '0', nilai: t.paruh2 || '' });
       const inB = el('input', { type: 'number', step: '100000', min: '0', nilai: t.bulan || '' });
-      const pn = panel(`Target biaya Infrastruktur — ${kunciBulan()}`, el('div', {}, [
-        el('p.bantuan', { teks: 'Target gabungan: HK Infrastruktur (Payroll) + seluruh biaya alat '
-          + 'berat & kendaraan. Contoh: 15.000.000 per paruh (2 minggu).' }),
+      const pn = panel(`Target biaya ALB & Kendaraan — ${kunciBulan()}`, el('div', {}, [
+        el('p.bantuan', { teks: 'Target KHUSUS alat berat & kendaraan: upah operator, premi, '
+          + 'solar, dan servis. Upah pekerja divisi Infrastruktur punya targetnya sendiri di '
+          + 'Pengaturan Kebun. Contoh: 15.000.000 per paruh (2 minggu).' }),
         el('div.baris-isian', {}, [isian('Paruh 1 (Rp)', inP1), isian('Paruh 2 (Rp)', inP2)]),
         isian('Sebulan penuh (Rp)', inB),
       ]), [

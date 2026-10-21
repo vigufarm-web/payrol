@@ -379,6 +379,73 @@ export async function pilihPengguna({ wajib = true } = {}) {
   });
 }
 
+/**
+ * Ganti PIN sendiri — tiap orang mengurus PIN-nya masing-masing, tanpa
+ * harus minta admin. PIN lama wajib dimasukkan (kalau sudah punya), supaya
+ * orang yang kebetulan menemukan layar terbuka tidak bisa menguncinya.
+ *
+ * Daftar pengguna hanya ada di bagian induk, jadi penggantian hanya bisa
+ * dilakukan dari sana — kalau tidak, PIN-nya akan tertulis ke berkas bagian
+ * lain dan tidak terbaca saat masuk.
+ */
+export async function gantiPinSendiri() {
+  const id = sessionStorage.getItem(KUNCI_SESI);
+  const p = id ? semua()[id] : null;
+  if (!p) { pesan('Masuk dulu dengan nama Anda untuk mengganti PIN.', 'awas', 6); return false; }
+  if (D.state.path !== BAGIAN_INDUK) {
+    pesan('Ganti PIN dilakukan dari bagian Payroll Operasional — daftar penggunanya '
+      + 'disimpan di sana. Pindah bagian dulu lewat tombol di menu kiri.', 'awas', 9);
+    return false;
+  }
+
+  return new Promise((selesai) => {
+    const tempatGalat = el('div');
+    const inLama = el('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off' });
+    const inBaru = el('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off' });
+    const inUlang = el('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off' });
+
+    const simpan = async () => {
+      kosongkan(tempatGalat);
+      const salah = [];
+      const baru = inBaru.value.trim();
+      if (p.pin) {
+        const { hash } = await hashPin(inLama.value, p.pin.salt);
+        if (hash !== p.pin.hash) salah.push('PIN lama salah.');
+      }
+      if (!baru) salah.push('PIN baru harus diisi.');
+      else if (baru.length < 4) salah.push('PIN baru minimal 4 angka.');
+      else if (!/^\d+$/.test(baru)) salah.push('PIN hanya boleh angka.');
+      if (baru !== inUlang.value.trim()) salah.push('Ulangi PIN tidak sama dengan PIN baru.');
+      if (salah.length) { tempatGalat.append(kesalahan(salah)); return; }
+
+      const pinBaru = await hashPin(baru);
+      D.setWeb((w) => {
+        w.pengguna ||= {};
+        if (!w.pengguna[id]) return;
+        w.pengguna[id] = { ...w.pengguna[id], pin: pinBaru };
+      });
+      pan.tutup();
+      pesan(`PIN ${p.nama} diganti. Jangan lupa Simpan ke GitHub supaya berlaku `
+        + 'di perangkat lain.', 'sukses', 9);
+      selesai(true);
+    };
+    inUlang.addEventListener('keydown', (e) => { if (e.key === 'Enter') simpan(); });
+
+    const pan = panel('Ganti PIN saya', el('div', {}, [
+      tempatGalat,
+      el('p', { teks: `PIN untuk masuk sebagai ${p.nama}. Hanya Anda yang perlu tahu — `
+        + 'admin pun tidak bisa melihatnya, hanya bisa menghapusnya kalau Anda lupa.' }),
+      p.pin ? isian('PIN lama *', inLama) : null,
+      isian('PIN baru *', inBaru, { bantuan: 'Minimal 4 angka.' }),
+      isian('Ulangi PIN baru *', inUlang),
+    ]), [
+      el('button.tombol-samar', { type: 'button', teks: 'Batal', onclick: () => { pan.tutup(); selesai(false); } }),
+      el('button.tombol-utama', { type: 'button', teks: 'Simpan PIN', onclick: simpan }),
+    ]);
+    setTimeout(() => (p.pin ? inLama : inBaru).focus(), 50);
+  });
+}
+
 // ------------------------------------------------------ halaman pengaturan
 export function halamanPengguna({ gambar, bisaEdit }) {
   const wadah = el('section');

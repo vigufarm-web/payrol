@@ -33,8 +33,42 @@ function dataPeriode(periode) {
 // =====================================================================
 // RINGKASAN PER UNIT
 // =====================================================================
+/**
+ * Angka acuan tiap unit dari SELURUH periode yang pernah tercatat — dipakai
+ * sebagai pembanding "standar" di Ringkasan unit. Satu bulan saja sering
+ * terlalu tipis untuk menilai irit atau boros (mis. bulan ini kebetulan
+ * tidak ada catatan solar), jadi angka sepanjang masa dipakai pendamping.
+ */
+function acuanSemuaPeriode() {
+  const per = new Map();
+  const ambil = (unitId) => {
+    const k = Number(unitId);
+    if (!per.has(k)) per.set(k, { hm: 0, km: 0, liter: 0, hari: new Set() });
+    return per.get(k);
+  };
+  for (const r of D.baris('work_logs')) {
+    if (r.deleted_at || !D.disetujui('work_logs', r.id)) continue;
+    const b = ambil(r.unit_id);
+    b.hm += hmPakai(r); b.km += kmPakai(r); b.hari.add(r.tanggal);
+  }
+  for (const r of D.baris('fuel_logs')) {
+    if (r.deleted_at) continue;
+    ambil(r.unit_id).liter += Number(r.liter) || 0;
+  }
+  const hasil = new Map();
+  for (const [k, b] of per) {
+    hasil.set(k, {
+      ltr_km: b.km > 0 && b.liter > 0 ? b.liter / b.km : null,
+      hm_ltr: b.liter > 0 && b.hm > 0 ? b.hm / b.liter : null,
+      hari: b.hari.size,
+    });
+  }
+  return hasil;
+}
+
 export function halamanRingkasanUnit({ periode }) {
   const { log, solar, servis } = dataPeriode(periode);
+  const acuan = acuanSemuaPeriode();
 
   const per = new Map();
   const ambil = (unitId) => {
@@ -65,14 +99,33 @@ export function halamanRingkasanUnit({ periode }) {
   }
   for (const r of servis) ambil(r.unit_id).biaya_servis += Number(r.biaya) || 0;
 
-  const data = [...per.values()].map((b) => ({
-    ...b,
-    hari_operasi: b.hari.size,
+  const data = [...per.entries()].map(([unitId, b]) => {
     // Tanpa catatan solar, efisiensinya belum bisa dihitung — jangan tampilkan 0
-    ltr_km: b.km > 0 && b.liter > 0 ? b.liter / b.km : null,
-    hm_ltr: b.liter > 0 && b.hm > 0 ? b.hm / b.liter : null,
-    total_biaya: b.biaya_solar + b.biaya_servis,
-  })).sort((a, b) => a.unit.localeCompare(b.unit, 'id'));
+    const ltr_km = b.km > 0 && b.liter > 0 ? b.liter / b.km : null;
+    const hm_ltr = b.liter > 0 && b.hm > 0 ? b.hm / b.liter : null;
+    const a = acuan.get(Number(unitId)) || {};
+    // Ltr/KM: makin KECIL makin irit. HM/Ltr: makin BESAR makin irit.
+    let banding = '–';
+    if (ltr_km != null && a.ltr_km != null) {
+      const selisih = ltr_km - a.ltr_km;
+      banding = Math.abs(selisih) < 0.005 ? 'sama'
+        : `${selisih < 0 ? '↓' : '↑'} ${angka(Math.abs(selisih), 2)}`;
+    } else if (hm_ltr != null && a.hm_ltr != null) {
+      const selisih = hm_ltr - a.hm_ltr;
+      banding = Math.abs(selisih) < 0.005 ? 'sama'
+        : `${selisih > 0 ? '↓' : '↑'} ${angka(Math.abs(selisih), 2)}`;
+    }
+    return {
+      ...b,
+      hari_operasi: b.hari.size,
+      ltr_km,
+      hm_ltr,
+      std_ltr_km: a.ltr_km ?? null,
+      std_hm_ltr: a.hm_ltr ?? null,
+      banding,
+      total_biaya: b.biaya_solar + b.biaya_servis,
+    };
+  }).sort((a, b) => a.unit.localeCompare(b.unit, 'id'));
 
   const totalHm = data.reduce((n, b) => n + b.hm, 0);
   const totalKm = data.reduce((n, b) => n + b.km, 0);
@@ -110,12 +163,23 @@ export function halamanRingkasanUnit({ periode }) {
             { l: 'Liter', k: 'liter', jenis: 'angka', pecahan: 1, total: true },
             { l: 'Biaya solar (Rp)', k: 'biaya_solar', jenis: 'uang', total: true },
             { l: 'Biaya servis (Rp)', k: 'biaya_servis', jenis: 'uang', total: true },
-            { l: 'Ltr/KM', nilai: (r) => (r.ltr_km == null ? '–' : angka(r.ltr_km, 2)) },
-            { l: 'HM/Ltr', nilai: (r) => (r.hm_ltr == null ? '–' : angka(r.hm_ltr, 2)) },
+            { l: 'Ltr/KM', nilai: (r) => (r.ltr_km == null ? '–' : angka(r.ltr_km, 2)), rata: 'angka' },
+            { l: 'HM/Ltr', nilai: (r) => (r.hm_ltr == null ? '–' : angka(r.hm_ltr, 2)), rata: 'angka' },
+            // Pembanding sepanjang masa — supaya terlihat bulan ini lebih
+            // irit atau lebih boros dari kebiasaan unit itu sendiri.
+            { l: 'Ltr/KM standar', rata: 'angka',
+              nilai: (r) => (r.std_ltr_km == null ? '–' : angka(r.std_ltr_km, 2)) },
+            { l: 'HM/Ltr standar', rata: 'angka',
+              nilai: (r) => (r.std_hm_ltr == null ? '–' : angka(r.std_hm_ltr, 2)) },
+            { l: 'Selisih', rata: 'angka', nilai: (r) => r.banding },
           ], data, { kosong: `Belum ada kegiatan unit pada ${periode.judul()}.` }),
           el('p.bantuan', {
             teks: 'Ltr/KM dipakai untuk dump truck & kendaraan (makin kecil makin irit). '
-              + 'HM/Ltr dipakai untuk alat berat (makin besar makin irit).',
+              + 'HM/Ltr dipakai untuk alat berat (makin besar makin irit). '
+              + 'Kolom "standar" dihitung dari SELURUH periode yang pernah tercatat, '
+              + 'jadi bisa dipakai menilai apakah bulan ini lebih irit atau lebih boros '
+              + 'dari kebiasaan unit itu sendiri. Kolom Selisih memakai tanda: '
+              + '↓ lebih irit, ↑ lebih boros.',
           }),
         ]),
       ]),

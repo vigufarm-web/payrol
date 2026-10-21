@@ -131,7 +131,10 @@ const MODUL = {
       solar: { l: 'Isi solar', sub: 'Pengisian BBM per unit', buat: halamanSolar, periode: true },
       servis: { l: 'Servis unit', sub: 'Perawatan dan perbaikan', buat: halamanServis, periode: true },
       impor: { l: 'Impor Excel', sub: 'Isi di Excel pakai template, lalu upload di sini', buat: halamanImpor },
-      monitor: { l: 'Monitor biaya', sub: 'Upah, premi, solar, dan servis terhadap target', buat: halamanMonitorAlat, periode: true },
+      // Dinamai "Laporan ALB & Kendaraan" supaya sejajar dengan "Laporan
+      // Kebun" di bagian payroll — isinya memang padanannya: biaya periode
+      // ini dibandingkan targetnya.
+      monitor: { l: 'Laporan ALB & Kendaraan', sub: 'Upah, premi, solar, dan servis terhadap target', buat: halamanMonitorAlat, periode: true },
       persetujuan: { l: 'Persetujuan', sub: 'Log harian (HM/KM & premi) menunggu acc', buat: halamanPersetujuanAlat },
       tarifpremi: { l: 'Tarif premi unit', sub: 'Rp per HM dan per KM tiap unit', buat: halamanTarifPremi },
       riwayat: { l: 'Riwayat perubahan', sub: 'Setiap penyimpanan tercatat di sini', buat: halamanRiwayat },
@@ -434,6 +437,11 @@ function bangunMenu() {
           await P.pilihPengguna({ wajib: true });
           gambar();
         },
+      }) : null,
+      // tiap orang mengurus PIN-nya sendiri, tidak perlu lewat admin
+      P.adaPengguna() && P.siapa() ? el('button.tombol-samar.tombol-kecil', {
+        type: 'button', teks: 'Ganti PIN saya',
+        onclick: async () => { if (await P.gantiPinSendiri()) gambar(); },
       }) : null,
       el('button.tombol-samar.tombol-kecil', {
         type: 'button', teks: 'Keluar',
