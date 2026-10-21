@@ -151,11 +151,73 @@ function periksa(namaTabel, isi, idSekarang) {
   return salah;
 }
 
-function formPanel(namaTabel, baris, saatSelesai) {
+/**
+ * Isian "Divisi" untuk master Karyawan.
+ *
+ * Bukan kolom database — penetapannya disimpan di bagian `web` (lihat
+ * divisiKaryawan di data.js). Boleh lebih dari satu divisi.
+ *
+ * Admin divisi hanya boleh mencentang/melepas divisi yang dia pegang;
+ * divisi lain tetap ditampilkan tapi terkunci, supaya dia tahu orang itu
+ * juga anggota divisi lain dan tidak bisa mencabutnya diam-diam.
+ */
+function isianDivisiKaryawan(baris, divisiBoleh) {
+  const boleh = divisiBoleh == null ? null : new Set(divisiBoleh.map(Number));
+  const terpasang = baris ? D.divisiKaryawan(baris.id) : [];
+  const dipakai = baris ? (petaDivisi('employees').get(Number(baris.id)) || new Set()) : new Set();
+  const semuaDivisi = [...D.baris('divisions')]
+    .filter((d) => !d.deleted_at && (D.barisAktif(d) || terpasang.includes(Number(d.id))))
+    .sort((a, b) => String(a.nama_divisi).localeCompare(String(b.nama_divisi), 'id'));
+
+  const kotak = new Map();
+  const daftar = el('div', { style: 'display:flex;flex-wrap:wrap;gap:.3rem .9rem' },
+    semuaDivisi.map((d) => {
+      const id = Number(d.id);
+      const terkunci = boleh !== null && !boleh.has(id);
+      const cb = el('input', { type: 'checkbox' });
+      cb.checked = terpasang.includes(id);
+      if (terkunci) cb.disabled = true;
+      kotak.set(id, { cb, terkunci });
+      return el('label', {
+        style: `display:flex;gap:.35rem;align-items:center;font-size:.9rem${terkunci ? ';opacity:.55' : ''}`,
+        title: terkunci ? 'Divisi ini di luar akses Anda — tidak bisa diubah dari sini.' : null,
+      }, [cb, d.nama_divisi + (dipakai.has(id) ? ' •' : '')]);
+    }));
+
+  const catatan = [];
+  if (dipakai.size) {
+    catatan.push(`Tanda • = sudah ada HK/lembur/premi orang ini di divisi itu (${
+      [...dipakai].map((d) => D.labelRef('divisions', d)).join(', ')}).`);
+  }
+  if (!terpasang.length) {
+    catatan.push('Belum ditetapkan — untuk sementara divisinya dibaca dari transaksi yang sudah ada.');
+  }
+  if (boleh !== null) catatan.push('Divisi yang redup di luar akses Anda, jadi tidak bisa diubah.');
+
+  return {
+    elemen: isian('Divisi karyawan', daftar, {
+      bantuan: (catatan.join(' ') || 'Boleh dicentang lebih dari satu kalau memang kerja lintas divisi.'),
+    }),
+    simpan(employeeId) {
+      const pilih = [];
+      for (const [id, { cb, terkunci }] of kotak) {
+        // yang terkunci dipertahankan apa adanya, jangan ikut terhapus
+        if (terkunci ? terpasang.includes(id) : cb.checked) pilih.push(id);
+      }
+      D.setDivisiKaryawan(employeeId, pilih);
+    },
+  };
+}
+
+function formPanel(namaTabel, baris, saatSelesai, divisiBoleh = null) {
   const def = TABEL[namaTabel];
   const { isiForm, kendali } = bangunForm(namaTabel, baris);
   const tempatGalat = el('div');
-  const badan = el('div', {}, [tempatGalat, isiForm]);
+
+  // Karyawan: isian divisi tempelan (disimpan di bagian `web`, bukan kolom
+  // database). Boleh lebih dari satu karena ada yang kerja lintas divisi.
+  const pilihDivisi = namaTabel === 'employees' ? isianDivisiKaryawan(baris, divisiBoleh) : null;
+  const badan = el('div', {}, [tempatGalat, isiForm, pilihDivisi?.elemen || null]);
 
   const simpan = async () => {
     const isi = bacaForm(namaTabel, kendali);
@@ -181,8 +243,9 @@ function formPanel(namaTabel, baris, saatSelesai) {
       ]), { ya: 'Tetap simpan sebagai baru', tidak: 'Batal — pakai yang sudah ada' });
       if (!lanjut) return;
     }
-    if (baris) D.ubah(namaTabel, baris.id, isi);
-    else D.tambah(namaTabel, isi);
+    const simpanan = baris ? (D.ubah(namaTabel, baris.id, isi), baris)
+      : D.tambah(namaTabel, isi);
+    if (pilihDivisi) pilihDivisi.simpan(simpanan.id);
     p.tutup();
     pesan(baris ? `${def.judul} diperbarui. Jangan lupa Simpan ke GitHub.`
       : `${def.judul} ditambahkan. Jangan lupa Simpan ke GitHub.`, 'sukses');
@@ -254,9 +317,26 @@ function saringMaster(namaTabel, data, divisiBoleh) {
     const ok = new Set(divisiBoleh.map(Number));
     return data.filter((r) => r.division_id == null || ok.has(Number(r.division_id)));
   }
+  // Karyawan: kalau divisinya sudah DITETAPKAN admin, itu yang dipakai —
+  // bukan tebakan dari transaksi. Yang belum ditetapkan jatuh ke cara lama.
+  if (namaTabel === 'employees') {
+    const ok = new Set(divisiBoleh.map(Number));
+    const tetap = D.petaDivisiKaryawan();
+    const sisa = data.filter((r) => !tetap.has(Number(r.id)));
+    const hasilTetap = data.filter((r) => {
+      const d = tetap.get(Number(r.id));
+      return d && d.some((x) => ok.has(x));
+    });
+    return [...hasilTetap, ...saringPakai('employees', sisa, ok)];
+  }
+  return saringPakai(namaTabel, data, new Set(divisiBoleh.map(Number)));
+}
+
+/** Saring berdasarkan PEMAKAIAN di transaksi: yang dipakai di divisi saya,
+ *  ditambah yang belum dipakai siapa pun (supaya yang baru tidak hilang). */
+function saringPakai(namaTabel, data, ok) {
   const peta = KOLOM_PAKAI[namaTabel];
   if (!peta) return data;
-  const ok = new Set(divisiBoleh.map(Number));
   const dipakaiDiSaya = new Set();
   const dipakaiOrangLain = new Set();
   for (const [tabel, kolom] of peta) {
@@ -312,15 +392,20 @@ export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus, hak }) {
     // anggota divisi mana. Blok sudah punya kolom divisi sendiri.
     const pakaiDivisi = KOLOM_PAKAI[namaTabel] && namaTabel !== 'blocks';
     const jejakDivisi = pakaiDivisi ? petaDivisi(namaTabel) : null;
+    const tetapDivisi = namaTabel === 'employees' ? D.petaDivisiKaryawan() : null;
+    const namaiDivisi = (daftar) => [...daftar].map((d) => D.labelRef('divisions', d))
+      .sort((a, b) => String(a).localeCompare(String(b), 'id')).join(', ');
     const kolomDivisi = pakaiDivisi ? {
       l: 'Divisi',
       k: '_divisi',
       jenis: 'teks',
       nilai: (r) => {
+        // penetapan admin menang atas tebakan dari transaksi
+        const tetap = tetapDivisi?.get(Number(r.id));
+        if (tetap?.length) return namaiDivisi(tetap);
         const s = jejakDivisi.get(Number(r.id));
-        if (!s || !s.size) return '— belum terpakai —';
-        return [...s].map((d) => D.labelRef('divisions', d))
-          .sort((a, b) => String(a).localeCompare(String(b), 'id')).join(', ');
+        if (!s || !s.size) return namaTabel === 'employees' ? '— belum ditetapkan —' : '— belum terpakai —';
+        return namaiDivisi(s) + (namaTabel === 'employees' ? ' (dari transaksi)' : '');
       },
     } : null;
 
@@ -347,7 +432,9 @@ export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus, hak }) {
       catatanSaring,
       tabel(kolom, data, {
         kosong: `Belum ada ${def.tunggal}.`,
-        saatKlik: bisaEdit() ? (r) => formPanel(namaTabel, r, () => { gambarTabel(); gambar(); }) : null,
+        saatKlik: bisaEdit()
+          ? (r) => formPanel(namaTabel, r, () => { gambarTabel(); gambar(); }, divisiBoleh())
+          : null,
       }),
       bisaEdit() && data.length
         ? el('p.samar', { style: 'margin:.6rem 0 0; font-size:.85rem', teks: 'Klik satu baris untuk mengubah atau menghapusnya.' })
@@ -374,7 +461,7 @@ export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus, hak }) {
     bisaEdit()
       ? el('button.tombol-utama', {
         type: 'button', teks: `Tambah ${def.tunggal}`,
-        onclick: () => formPanel(namaTabel, null, () => { gambarTabel(); gambar(); }),
+        onclick: () => formPanel(namaTabel, null, () => { gambarTabel(); gambar(); }, divisiBoleh()),
       })
       : null,
   ]);

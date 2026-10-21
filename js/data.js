@@ -146,7 +146,42 @@ export function web() {
   w.kebun ||= {};
   w.target ||= {};
   w.persetujuan ||= {};
+  w.divisiKaryawan ||= {};
   return w;
+}
+
+// ------------------------------------------------- divisi tiap karyawan
+// Tabel `employees` di database aplikasi desktop TIDAK punya kolom divisi —
+// satu daftar dipakai bersama semua divisi. Supaya admin tetap bisa
+// menetapkan "orang ini anggota Pisang", penetapannya disimpan di bagian
+// `web` (khusus situs, ikut terbawa saat Kirim/Tarik desktop tapi tidak
+// mengubah struktur databasenya). Satu orang boleh lebih dari satu divisi
+// karena memang ada yang kerja lintas divisi.
+
+/** Divisi yang DITETAPKAN admin untuk satu karyawan (array id, bisa kosong). */
+export function divisiKaryawan(employeeId) {
+  const v = web().divisiKaryawan?.[String(employeeId)];
+  return Array.isArray(v) ? v.map(Number) : [];
+}
+
+/** Semua penetapan sekaligus: Map(employeeId -> [divisionId]). */
+export function petaDivisiKaryawan() {
+  const peta = new Map();
+  for (const [k, v] of Object.entries(web().divisiKaryawan || {})) {
+    if (Array.isArray(v) && v.length) peta.set(Number(k), v.map(Number));
+  }
+  return peta;
+}
+
+/** Tetapkan divisi karyawan. Daftar kosong = hapus penetapannya. */
+export function setDivisiKaryawan(employeeId, daftar) {
+  const bersih = [...new Set((daftar || []).map(Number).filter((n) => Number.isFinite(n) && n > 0))];
+  setWeb((w) => {
+    w.divisiKaryawan ||= {};
+    if (bersih.length) w.divisiKaryawan[String(employeeId)] = bersih;
+    else delete w.divisiKaryawan[String(employeeId)];
+  });
+  return bersih;
 }
 
 /** Ubah bagian `web` lewat fungsi, lalu tandai ada perubahan. */
@@ -583,7 +618,7 @@ export function gabungTiga(dasar, lokal, remote) {
     if (lW[kunci] === undefined) delete hasil.web[kunci];
     else hasil.web[kunci] = lW[kunci];
   }
-  for (const sub of ['target', 'kebun', 'unitPremi', 'pengguna', 'targetAlat']) {
+  for (const sub of ['target', 'kebun', 'unitPremi', 'pengguna', 'targetAlat', 'divisiKaryawan']) {
     const dS = dW[sub] || {};
     const lS = lW[sub] || {};
     for (const k of new Set([...Object.keys(dS), ...Object.keys(lS)])) {
