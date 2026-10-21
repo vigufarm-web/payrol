@@ -152,16 +152,20 @@ export function bolehHalaman(kunci) {
   // memang digembok PIN tetap boleh — penting saat pemilik baru menyusun
   // daftar pengguna pertama kali (dirinya belum ada di daftar).
   if (!p) {
-    // "Lihat saja": semua halaman boleh DIBACA (pembatasan memang untuk
-    // menginput/merevisi, bukan melihat — penjaga tulis tetap menolak).
-    // Halaman bergembok PIN admin tetap butuh gemboknya dibuka di sesi ini.
-    // Monitoring semua divisi = hak admin. Belum ada yang masuk: boleh hanya
-    // kalau PIN admin sudah dibuka di sesi ini (gemboknya PIN itu).
-    if (kunci === 'semua') return sessionStorage.getItem('app.pengguna.buka') === '1';
+    // Daftar pengguna ada tapi belum ada yang masuk: TIDAK ada halaman yang
+    // ditampilkan. Dulu di sini ada mode "Lihat saja", tapi nama pengisi,
+    // nama yang meng-acc, dan riwayat perubahan tersebar di banyak halaman —
+    // membuka situs tanpa masuk sama saja membocorkan siapa saja yang punya
+    // akses. Pemilik masuk lewat akun adminnya sendiri seperti yang lain.
+    //
+    // SATU pengecualian: halaman Pengguna, dan hanya kalau PIN admin sudah
+    // dibuka di sesi ini. Ini bukan "lihat saja" — halaman lain tetap
+    // tertutup. Tanpa ini, begitu akun admin PERTAMA dibuat, halaman
+    // penyusun daftarnya langsung menutup diri (pembuatnya belum masuk,
+    // karena akunnya baru saja ada), jadi daftarnya tidak bisa diteruskan
+    // dan akun itu bisa hilang sebelum sempat tersimpan.
     if (kunci === 'pengguna') return sessionStorage.getItem('app.pengguna.buka') === '1';
-    if (kunci === 'target') return sessionStorage.getItem('app.target.buka') === '1';
-    if (kunci === 'tarifpremi') return sessionStorage.getItem('app.tarif.buka') === '1';
-    return true;
+    return false;
   }
   if (p.admin) return true;
   // Monitoring Semua Divisi menyatukan angka SEMUA divisi dan semua bagian —
@@ -339,12 +343,16 @@ export async function pilihPengguna({ wajib = true } = {}) {
     inNama.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); inPin.focus(); } });
 
     const tombol = [
-      el('button.tombol-samar', {
-        type: 'button', teks: wajib ? 'Lihat saja' : 'Batal',
+      // TIDAK ada "Lihat saja": daftar pengguna, nama pengisi, dan nama yang
+      // meng-acc tersebar di banyak halaman, jadi membuka situs tanpa masuk
+      // sama saja membocorkan siapa saja yang punya akses. Pemilik sudah
+      // punya akun admin sendiri, jadi tidak perlu jalan masuk cadangan.
+      wajib ? null : el('button.tombol-samar', {
+        type: 'button', teks: 'Batal',
         onclick: () => { pan.tutup(); selesai(false); },
       }),
       el('button.tombol-utama', { type: 'button', teks: 'Masuk', onclick: masuk }),
-    ];
+    ].filter(Boolean);
 
     const pan = panel('Siapa yang mengisi?', el('div', {}, [
       tempatGalat,
@@ -352,8 +360,9 @@ export async function pilihPengguna({ wajib = true } = {}) {
         + 'tercatat atas nama Anda dan hanya divisi Anda yang terbuka untuk diubah.' }),
       isian('Nama *', inNama),
       isian('PIN', inPin, { bantuan: 'Kosongkan kalau nama Anda belum dipasangi PIN.' }),
-      el('p.bantuan', { teks: 'Kalau dilewati, situs tetap bisa dibuka untuk melihat laporan, '
-        + 'tapi tidak ada yang bisa diinput atau direvisi.' }),
+      wajib
+        ? el('p.bantuan', { teks: 'Harus masuk dulu — tanpa nama, isi situs tidak ditampilkan.' })
+        : null,
     ]), tombol);
 
     setTimeout(() => inNama.focus(), 50);

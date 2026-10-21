@@ -428,8 +428,10 @@ function bangunMenu() {
         type: 'button',
         teks: P.siapa() ? `${P.namaSiapa()} — ganti` : 'Belum masuk — pilih nama',
         onclick: async () => {
+          // wajib: tidak ada lagi mode "lihat saja", jadi tombol Batal yang
+          // meninggalkan layar tanpa siapa-siapa cuma membingungkan
           P.keluar();
-          await P.pilihPengguna({ wajib: false });
+          await P.pilihPengguna({ wajib: true });
           gambar();
         },
       }) : null,
@@ -537,12 +539,28 @@ function spandukLokal() {
 }
 
 function gambarTanpaAkses(judulHalaman) {
+  // Belum masuk sama sekali bukan soal "hak akun" — isi situs memang tidak
+  // ditampilkan sebelum ada yang masuk, jadi layarnya pun harus beda.
+  if (!P.siapa()) {
+    gambarKepala('Belum masuk', 'Masuk dulu untuk membuka isi situs', false);
+    kosongkan(elIsi).append(el('div.lembar', {}, [
+      el('div.lembar-isi', {}, [
+        el('p', { teks: 'Ketik nama Anda yang sudah didaftarkan admin, beserta PIN-nya. '
+          + 'Sebelum masuk, tidak ada data maupun laporan yang ditampilkan.' }),
+        el('button.tombol-utama', {
+          type: 'button', teks: 'Masuk sekarang',
+          onclick: async () => { await P.pilihPengguna({ wajib: true }); gambar(); },
+        }),
+      ]),
+    ]));
+    tandaiMenuAktif();
+    return;
+  }
   gambarKepala(judulHalaman, 'Halaman ini tidak dibuka untuk akun Anda', false);
   kosongkan(elIsi).append(el('div.lembar', {}, [
     el('div.lembar-isi', {}, [
-      el('p', { teks: P.siapa()
-        ? `${P.namaSiapa()} tidak diberi hak membuka halaman ini. Hubungi admin kalau memang perlu.`
-        : 'Belum ada yang masuk. Pilih nama Anda lewat tombol di menu kiri.' }),
+      el('p', { teks: `${P.namaSiapa()} tidak diberi hak membuka halaman ini. `
+        + 'Hubungi admin kalau memang perlu.' }),
     ]),
   ]));
   tandaiMenuAktif();
