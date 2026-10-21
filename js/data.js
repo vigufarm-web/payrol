@@ -314,6 +314,9 @@ export async function muat(password, path = state.path) {
   state.sha = sha;
   state.password = password;
   state.belumDisimpan = false;
+  // potret "dasar" untuk penggabungan otomatis saat dua admin menyimpan
+  // hampir bersamaan (lihat gabungTiga di bawah)
+  state.dasarJson = JSON.stringify(data);
   // token bersama (kalau admin menyimpannya di berkas) langsung berlaku
   gh.setTokenBersama(data.web?.token || '');
   return data;
@@ -444,38 +447,142 @@ export const modeLokal = () => !gh.lokasiRepo();
 export async function simpan(pesan) {
   if (!state.data) throw new Error('Belum ada data yang dimuat.');
   if (!state.password) throw new Error('Password data belum dimasukkan.');
-
-  state.data.rev = (Number(state.data.rev) || 0) + 1;
-  state.data.dibuat = new Date().toISOString().slice(0, 19);
-  state.data.dari = namaPengisi() ? `Web — ${namaPengisi()}` : 'Web';
-  const meta = susunMeta();
-
-  const amplop = await kunciAmplop(state.data, state.password, meta);
-
-  // Tanpa repo tidak ada tempat mengirim, jadi hasilnya diunduh sebagai berkas.
-  // Berguna untuk ujicoba di komputer sendiri: berkasnya tinggal ditaruh di
-  // folder data/ (atau diimpor balik ke aplikasi desktop).
-  if (modeLokal()) {
-    const nama = state.path.split('/').pop() || 'data.json';
-    unduhTeks(nama, JSON.stringify(amplop), 'application/json');
-    state.meta = meta;
-    state.belumDisimpan = false;
-    hapusDraf();
-    return state.data.rev;
-  }
+  state.gabungTerakhir = 0;
 
   const judul = namaPengisi() ? `${pesan} (${namaPengisi()})` : pesan;
-  try {
-    state.sha = await gh.tulisFile(state.path, amplop, state.sha, judul);
-  } catch (e) {
-    state.data.rev -= 1;
-    throw e;
+  // Dua admin bisa menyimpan hampir bersamaan: yang kedua kena tolak (409).
+  // Alih-alih menyerah, perubahan LOKAL digabungkan ke data TERBARU lalu
+  // dicoba simpan lagi — tidak ada input siapa pun yang hilang.
+  for (let percobaan = 0; ; percobaan++) {
+    state.data.rev = (Number(state.data.rev) || 0) + 1;
+    state.data.dibuat = new Date().toISOString().slice(0, 19);
+    state.data.dari = namaPengisi() ? `Web — ${namaPengisi()}` : 'Web';
+    const meta = susunMeta();
+    const amplop = await kunciAmplop(state.data, state.password, meta);
+
+    // Tanpa repo tidak ada tempat mengirim, jadi hasilnya diunduh sebagai
+    // berkas (ujicoba di komputer sendiri).
+    if (modeLokal()) {
+      const nama = state.path.split('/').pop() || 'data.json';
+      unduhTeks(nama, JSON.stringify(amplop), 'application/json');
+      state.meta = meta;
+      state.belumDisimpan = false;
+      hapusDraf();
+      return state.data.rev;
+    }
+
+    try {
+      state.sha = await gh.tulisFile(state.path, amplop, state.sha, judul);
+      state.meta = meta;
+      state.belumDisimpan = false;
+      state.dasarJson = JSON.stringify(state.data);
+      hapusDraf();   // input sudah aman di GitHub
+      perbaruiDaftar(meta).catch(() => { /* daftar hanya pelengkap tampilan */ });
+      return state.data.rev;
+    } catch (e) {
+      state.data.rev -= 1;
+      if (!e.bentrok || percobaan >= 2) throw e;
+      const { isi, sha } = await gh.bacaFile(state.path);
+      if (!isi) throw e;
+      const terbaru = await bukaAmplop(isi, state.password);
+      const dasar = state.dasarJson ? JSON.parse(state.dasarJson) : terbaru;
+      state.data = gabungTiga(dasar, state.data, terbaru);
+      state.aplikasi = state.data.aplikasi || state.aplikasi;
+      state.sha = sha;
+      state.dasarJson = JSON.stringify(terbaru);
+      state.gabungTerakhir++;
+    }
   }
-  state.meta = meta;
-  state.belumDisimpan = false;
-  hapusDraf();   // input sudah aman di GitHub, cadangan lokal tak diperlukan lagi
-  perbaruiDaftar(meta).catch(() => { /* daftar hanya pelengkap tampilan */ });
-  return state.data.rev;
+}
+
+/**
+ * Gabung tiga arah: `dasar` (data saat terakhir dimuat), `lokal` (dengan
+ * perubahan admin ini), `remote` (yang terlanjur tersimpan admin lain).
+ * - Baris BARU lokal: diberi id (dan nomor transaksi) baru supaya tidak
+ *   menabrak baris baru admin lain.
+ * - Baris yang DIUBAH lokal: menimpa baris yang sama di remote.
+ * - Baris yang DIHAPUS lokal: dihapus juga dari remote.
+ * - Pengaturan web (target, pengguna, persetujuan, dll): hanya kunci yang
+ *   benar-benar diubah lokal yang menimpa; sisanya ikut remote.
+ */
+export function gabungTiga(dasar, lokal, remote) {
+  const hasil = JSON.parse(JSON.stringify(remote));
+  hasil.tabel ||= {};
+  const beda = (a, b) => JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+  const petaId = {};   // tabel -> Map(id lokal baru -> id final)
+
+  for (const t of Object.keys(lokal.tabel || {})) {
+    const barisDasar = new Map(((dasar.tabel || {})[t] || []).map((r) => [Number(r.id), r]));
+    hasil.tabel[t] ||= [];
+    const barisHasil = hasil.tabel[t];
+    const petaHasil = new Map(barisHasil.map((r) => [Number(r.id), r]));
+    let maksId = 0;
+    for (const r of barisHasil) maksId = Math.max(maksId, Number(r.id) || 0);
+    const nomorAda = new Set(barisHasil.map((r) => r.nomor_transaksi).filter(Boolean));
+    petaId[t] = new Map();
+
+    const idLokal = new Set();
+    for (const l of (lokal.tabel[t] || [])) {
+      const id = Number(l.id);
+      idLokal.add(id);
+      const d = barisDasar.get(id);
+      if (d) {
+        if (beda(l, d)) {
+          const r = petaHasil.get(id);
+          if (r) Object.assign(r, l);   // perubahan lokal menang di baris itu
+          // kalau admin lain sudah menghapus permanen barisnya, biarkan
+        }
+      } else if (!(petaHasil.has(id) && !beda(petaHasil.get(id), l))) {
+        // baris BARU lokal -> id baru (hindari tabrakan id baris baru remote)
+        const baru = { ...l, id: ++maksId };
+        if (baru.nomor_transaksi) {
+          while (nomorAda.has(baru.nomor_transaksi)) baru.nomor_transaksi += '-B';
+          nomorAda.add(baru.nomor_transaksi);
+        }
+        petaId[t].set(id, baru.id);
+        barisHasil.push(baru);
+        petaHasil.set(baru.id, baru);
+      }
+    }
+    // dihapus permanen secara lokal -> hapus juga di hasil
+    for (const [id] of barisDasar) {
+      if (idLokal.has(id)) continue;
+      const i = barisHasil.findIndex((r) => Number(r.id) === id);
+      if (i >= 0) barisHasil.splice(i, 1);
+    }
+  }
+
+  // ---- pengaturan web
+  hasil.web ||= {};
+  const dW = dasar.web || {};
+  const lW = lokal.web || {};
+  for (const kunci of ['adminPin', 'token']) {
+    if (!beda(lW[kunci], dW[kunci])) continue;
+    if (lW[kunci] === undefined) delete hasil.web[kunci];
+    else hasil.web[kunci] = lW[kunci];
+  }
+  for (const sub of ['target', 'kebun', 'unitPremi', 'pengguna', 'targetAlat']) {
+    const dS = dW[sub] || {};
+    const lS = lW[sub] || {};
+    for (const k of new Set([...Object.keys(dS), ...Object.keys(lS)])) {
+      if (!beda(lS[k], dS[k])) continue;
+      hasil.web[sub] ||= {};
+      if (lS[k] === undefined) delete hasil.web[sub][k];
+      else hasil.web[sub][k] = lS[k];
+    }
+  }
+  const dP = dW.persetujuan || {};
+  const lP = lW.persetujuan || {};
+  for (const t of Object.keys(lP)) {
+    for (const idK of Object.keys(lP[t] || {})) {
+      if (!beda(lP[t][idK], (dP[t] || {})[idK])) continue;
+      const idFinal = petaId[t]?.get(Number(idK)) ?? idK;
+      hasil.web.persetujuan ||= {};
+      hasil.web.persetujuan[t] ||= {};
+      hasil.web.persetujuan[t][String(idFinal)] = lP[t][idK];
+    }
+  }
+  return hasil;
 }
 
 async function perbaruiDaftar(meta) {

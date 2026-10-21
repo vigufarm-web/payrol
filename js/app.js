@@ -315,6 +315,7 @@ async function bangunKerangka() {
   }
   // daftar pengguna terpusat di bagian induk — baca dulu
   await P.muatPusat();
+  pasangAutoMuat();   // layar ikut tersegar sendiri saat admin lain menyimpan
   // kalau daftar pengguna sudah diisi, tanyakan dulu siapa yang mengisi
   if (P.adaPengguna() && !P.siapa()) await P.pilihPengguna({ wajib: true });
   // orang ini tidak diberi akses ke bagian yang sedang terbuka?
@@ -591,6 +592,10 @@ export async function simpanSekarang(pesanCommit = null) {
   try {
     const rev = await D.simpan(judul);
     sedang.remove();
+    if (D.state.gabungTerakhir) {
+      pesan('Ada admin lain yang menyimpan duluan — perubahan kedua-duanya '
+        + 'sudah digabung otomatis, tidak ada yang hilang.', 'info', 7);
+    }
     if (D.modeLokal()) {
       const nama = D.state.path.split('/').pop();
       pesan(`Berkas ${nama} (rev ${rev}) terunduh. Timpa berkas lama di folder data/ `
@@ -635,6 +640,48 @@ function mintaNama() {
     ]);
   });
 }
+
+// ---------------------------------------------------------------------
+// MUAT OTOMATIS — layar ikut terbarui sendiri kalau admin lain menyimpan,
+// jadi tidak perlu menekan "Muat ulang" tiap kali. Hanya berjalan kalau
+// tidak ada perubahan yang belum disimpan di layar ini (supaya input yang
+// sedang dikerjakan tidak tertimpa) dan tab-nya sedang dilihat.
+// ---------------------------------------------------------------------
+const KUNCI_AUTOMUAT = 'app.automuat';
+export const autoMuatAktif = () => localStorage.getItem(KUNCI_AUTOMUAT) !== '0';
+export const setAutoMuat = (aktif) => {
+  localStorage.setItem(KUNCI_AUTOMUAT, aktif ? '1' : '0');
+  pasangAutoMuat();
+};
+let timerAutoMuat = null;
+let sedangPeriksa = false;
+async function periksaDataBaru() {
+  if (sedangPeriksa || D.modeLokal() || !autoMuatAktif()) return;
+  if (D.state.belumDisimpan || document.hidden) return;
+  if (document.querySelector('.panel, .dialog')) return;   // jangan ganggu form terbuka
+  sedangPeriksa = true;
+  try {
+    const { isi } = await gh.bacaFile('data/daftar.json');
+    const revBaru = Number(isi?.dataset?.[D.state.path]?.rev) || 0;
+    const revSaya = Number(D.state.data?.rev) || 0;
+    if (revBaru > revSaya) {
+      await D.muatUlang();
+      await P.muatPusat();
+      gambar();
+      pesan(`Data diperbarui admin lain (rev ${D.state.data.rev}) — layar ini ikut disegarkan.`,
+        'info', 6);
+    }
+  } catch { /* jaringan/batas permintaan: coba lagi di putaran berikutnya */ }
+  finally { sedangPeriksa = false; }
+}
+export function pasangAutoMuat() {
+  clearInterval(timerAutoMuat);
+  if (!autoMuatAktif() || D.modeLokal()) return;
+  timerAutoMuat = setInterval(periksaDataBaru, 45000);
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) periksaDataBaru();   // balik ke tab -> langsung cek
+});
 
 export async function muatUlangData() {
   if (D.state.belumDisimpan) {

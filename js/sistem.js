@@ -92,6 +92,21 @@ export function halamanSistem({ gambar, bisaEdit, muatUlangData }) {
             el('span', {}, [el('strong', { teks: 'Simpan otomatis' }),
               el('span.bantuan', { teks: ' — kirim sendiri ke GitHub beberapa detik setelah input terakhir.' })]),
           ]),
+          el('label', { style: 'display:flex;gap:.45rem;align-items:center;margin:0 0 .8rem' }, [
+            (() => {
+              const c = el('input', { type: 'checkbox' });
+              c.checked = A0.autoMuatAktif();
+              c.onchange = () => {
+                A0.setAutoMuat(c.checked);
+                pesan(c.checked
+                  ? 'Muat otomatis AKTIF — layar ini ikut tersegar saat admin lain menyimpan.'
+                  : 'Muat otomatis mati — tekan "Muat ulang" untuk melihat perubahan admin lain.', 'sukses', 6);
+              };
+              return c;
+            })(),
+            el('span', {}, [el('strong', { teks: 'Muat otomatis' }),
+              el('span.bantuan', { teks: ' — ambil data terbaru tiap ~45 detik, supaya tidak perlu tekan Muat ulang.' })]),
+          ]),
           // berbagi token: cukup admin yang mengisi, yang lain otomatis
           bolehAtur && gh.adaTokenLokal() && !dibagikan ? el('div', { style: 'margin:.6rem 0' }, [
             el('button.tombol-samar', {
