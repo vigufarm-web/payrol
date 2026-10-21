@@ -1152,20 +1152,24 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
       catatan: inCatatan.value.trim(),
     };
     if (namaTabel === 'borongan_transactions') isi.activity_id = null;
+    const perluAcc = namaTabel === 'lembur_transactions' || namaTabel === 'premi_transactions';
     if (barisAda) {
       D.ubah(namaTabel, barisAda.id, isi);
+      // revisi menggugurkan acc yang sudah ada: kepala kebun harus
+      // menyetujui ulang angka yang baru
+      if (perluAcc) D.tandaiMenunggu(namaTabel, barisAda.id);
     } else {
       const baru = D.tambah(namaTabel, {
         ...isi,
         nomor_transaksi: D.nomorBaru(namaTabel, prefix, inTanggal.value),
         created_by: D.namaPengisi() || 'Web',
       });
-      D.tandaiMenunggu(namaTabel, baru.id);
+      if (perluAcc) D.tandaiMenunggu(namaTabel, baru.id);
     }
     p.tutup();
     pesan(barisAda
-      ? `${kategori} diperbarui.`
-      : `${kategori} ditambahkan — menunggu persetujuan kepala kebun.`, 'sukses', 6);
+      ? `${kategori} diperbarui${perluAcc ? ' — acc lama gugur, menunggu persetujuan ulang kepala kebun' : ''}.`
+      : `${kategori} ditambahkan${perluAcc ? ' — menunggu persetujuan kepala kebun' : ''}.`, 'sukses', 6);
     saatSelesai();
   };
 
