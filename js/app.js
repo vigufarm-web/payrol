@@ -601,9 +601,14 @@ export function gambar() {
   // halaman bergembok PIN admin: hak ubahnya mengikuti gembok itu,
   // bukan hak input/revisi transaksi
   const FLAG_PIN = { pengguna: 'app.pengguna.buka', target: 'app.target.buka', tarifpremi: 'app.tarif.buka' };
+  // Halaman Persetujuan: yang dipakai BUKAN hak input/revisi, melainkan hak
+  // menyetujui/membatalkan. Kepala divisi memang tidak menginput apa pun —
+  // kalau dipukul rata dengan hak input, dia tidak bisa meng-acc sama sekali.
   const konteksHal = FLAG_PIN[kunci]
     ? { ...konteks, bisaEdit: () => bisaEdit() && P.bolehKelolaTerkunci(FLAG_PIN[kunci]) }
-    : konteks;
+    : kunci === 'persetujuan'
+      ? { ...konteks, bisaEdit: () => bisaEdit() && (P.bolehSetuju() || P.bolehBatal()) }
+      : konteks;
   elIsi.append(h.buat(konteksHal));
   tandaiMenuAktif();
   window.scrollTo(0, 0);
@@ -728,6 +733,10 @@ export async function muatUlangData() {
   const sedang = pesan('Mengambil data terbaru…', 'info', 30);
   try {
     await D.muatUlang();
+    // daftar pengguna & token bersama ikut disegarkan — tanpa ini, menekan
+    // "Muat ulang" di bagian Alat Berat menghapus token bersama dari memori
+    // (berkas bagian itu memang tidak memuat tokennya) dan mode edit mati
+    await P.muatPusat();
     sedang.remove();
     pesan(`Data terbaru dimuat (rev ${D.state.data.rev}).`, 'sukses');
     gambar();

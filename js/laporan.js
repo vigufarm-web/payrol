@@ -7,7 +7,7 @@ import { dialogRekapGaji } from './rekap-gaji.js';
 import { TABEL } from './skema-payroll.js';
 import {
   el, tabel, kosongkan, rupiah, rupiahPenuh, angka, hk as fhk, tanggal as ftanggal,
-  namaBulan, pesan,
+  namaBulan, pesan, taruh, pilihParuh, periodeParuh,
 } from './ui.js';
 
 const hidup = (t) => D.baris(t).filter((r) => !r.deleted_at);
@@ -89,7 +89,99 @@ function grafikHarian(barisHk, periode) {
   ]);
 }
 
+/**
+ * Ringkasan — angka gabungan satu periode.
+ *
+ * Dibungkus supaya bisa digambar ulang saat paruh periode gajian diganti
+ * (1–15 / 16–akhir / sebulan penuh), dan supaya bagian Alat Berat &
+ * Kendaraan — yang datanya ada di berkas lain — bisa diisi belakangan
+ * tanpa menahan tampilnya angka payroll.
+ */
 export function halamanRingkasan({ periode }) {
+  const wadah = el('section');
+  const isi = el('div');
+  const gambarIsi = () => {
+    const per = periodeParuh(periode);
+    taruh(kosongkan(isi), isiRingkasan(per));
+    tempelAlatBerat(isi, per);
+  };
+  taruh(wadah, pilihParuh(() => gambarIsi()), isi);
+  gambarIsi();
+  return wadah;
+}
+
+/**
+ * Bagian "Alat Berat & Kendaraan" di Ringkasan. Datanya dibaca dari berkas
+ * bagian sebelah, jadi ditempel setelah angka payroll tampil. Kalau berkasnya
+ * tidak terbaca (password beda / belum diupload), bagian ini dilewati diam —
+ * angka payroll tidak boleh ikut gagal karenanya.
+ */
+const JALUR_ALAT = 'data/alat-berat.json';
+async function tempelAlatBerat(tempat, per) {
+  if (D.state.aplikasi !== 'PayrollHK') return;
+  // Jangan meminta berkas yang memang tidak terdaftar di daftar.json —
+  // permintaannya akan dijawab 404 dan mengotori log galat tanpa guna.
+  if (!D.state.daftar?.dataset?.[JALUR_ALAT]) return;
+  const tempatAlat = el('section');
+  tempat.append(tempatAlat);
+  let alat = null;
+  try { alat = await D.muatBagianLain(JALUR_ALAT); } catch { /* lewati */ }
+  if (!alat?.tabel?.work_logs) { tempatAlat.remove(); return; }
+
+  const [dari, sampai] = per.rentang();
+  const nol = (v) => Number(v) || 0;
+  const accAlat = (id) => {
+    const c = alat.web?.persetujuan?.work_logs?.[String(id)];
+    return !c || c.status === 'disetujui';
+  };
+  const op = new Map((alat.tabel.operators || []).map((o) => [Number(o.id), o]));
+  let upah = 0; let premi = 0; let hm = 0; let km = 0; let hkOp = 0;
+  const unit = new Set();
+  for (const r of alat.tabel.work_logs) {
+    if (r.deleted_at || r.tanggal < dari || r.tanggal > sampai || !accAlat(r.id)) continue;
+    const o = op.get(Number(r.operator_id));
+    const jam = Math.max(0, nol(r.hm_akhir) - nol(r.hm_awal));
+    hm += jam;
+    km += Math.max(0, nol(r.km_akhir) - nol(r.km_awal));
+    hkOp += nol(r.hk);
+    upah += nol(r.hk) * nol(o?.tarif_harian) + jam * nol(o?.tarif_jam);
+    premi += nol(r.premi);
+    unit.add(Number(r.unit_id));
+  }
+  let solar = 0; let servis = 0; let liter = 0;
+  for (const r of alat.tabel.fuel_logs || []) {
+    if (r.deleted_at || r.tanggal < dari || r.tanggal > sampai) continue;
+    liter += nol(r.liter); solar += nol(r.liter) * nol(r.harga_liter);
+  }
+  for (const r of alat.tabel.service_logs || []) {
+    if (r.deleted_at || r.tanggal < dari || r.tanggal > sampai) continue;
+    servis += nol(r.biaya);
+  }
+  if (!unit.size && !solar && !servis) { tempatAlat.remove(); return; }
+
+  taruh(tempatAlat, el('div.lembar', {}, [
+    el('div.lembar-kepala', {}, [el('h2', { teks: 'Alat Berat & Kendaraan' })]),
+    el('div.lembar-isi', {}, [
+      tabel([
+        { l: 'Jenis', k: 'jenis' },
+        { l: 'Nilai (Rp)', k: 'nilai', jenis: 'uang', total: true },
+      ], [
+        { jenis: 'Upah operator', nilai: Math.round(upah) },
+        { jenis: 'Premi operator', nilai: Math.round(premi) },
+        { jenis: 'Solar', nilai: Math.round(solar) },
+        { jenis: 'Servis & perbaikan', nilai: Math.round(servis) },
+      ], { kosong: 'Belum ada kegiatan unit pada periode ini.' }),
+      el('p.bantuan', {
+        teks: `${unit.size} unit beroperasi · ${angka(hkOp, 2)} HK operator · `
+          + `${angka(hm, 1)} HM · ${angka(km, 1)} KM · ${angka(liter, 1)} liter solar. `
+          + 'Angka ini TIDAK ikut dijumlahkan ke "Total upah" di atas — itu khusus '
+          + 'pekerja kebun. Log yang belum di-acc belum dihitung.',
+      }),
+    ]),
+  ]));
+}
+
+function isiRingkasan(periode) {
   const t = transaksiPeriode(periode);
   const kelompokPerPekerja = boronganKelompokPerPekerja(t.kelompok);
 

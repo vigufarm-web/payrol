@@ -268,3 +268,56 @@ export function kesalahan(daftar) {
     el('ul', {}, daftar.map((t) => el('li', { teks: t }))),
   ]);
 }
+
+// ---------------------------------------------------- paruh periode gajian
+// Gajian jatuh dua kali sebulan: tanggal 1–15 dan 16–akhir bulan. Pemilih
+// bulan di kepala halaman tetap menentukan BULANNYA; pemilih ini mempersempit
+// ke salah satu paruh. Pilihannya diingat selama sesi supaya tidak perlu
+// diklik ulang tiap pindah halaman.
+export const PARUH = [
+  { k: 'bulan', l: 'Sebulan penuh' },
+  { k: 'awal', l: 'Tgl 1–15' },
+  { k: 'akhir', l: 'Tgl 16–akhir' },
+];
+const KUNCI_PARUH = 'app.paruh';
+export const paruhPeriode = () => {
+  const v = sessionStorage.getItem(KUNCI_PARUH);
+  return PARUH.some((x) => x.k === v) ? v : 'bulan';
+};
+export const setParuhPeriode = (v) => sessionStorage.setItem(KUNCI_PARUH, v);
+
+/** Rentang tanggal [dari, sampai] untuk paruh yang dipilih. */
+export function rentangParuh(periode, paruh = paruhPeriode()) {
+  const [awal, akhir] = periode.rentang();
+  if (paruh === 'awal') return [awal, `${awal.slice(0, 8)}15`];
+  if (paruh === 'akhir') return [`${awal.slice(0, 8)}16`, akhir];
+  return [awal, akhir];
+}
+
+/** Judul periode yang sedang tampil, mis. "1–15 Oktober 2026". */
+export function judulParuh(periode, paruh = paruhPeriode()) {
+  if (paruh === 'bulan') return periode.judul();
+  const [d, s] = rentangParuh(periode, paruh);
+  return `${Number(d.slice(8))}–${Number(s.slice(8))} ${periode.judul()}`;
+}
+
+/** Salinan `periode` yang rentang & judulnya mengikuti paruh terpilih. */
+export const periodeParuh = (periode, paruh = paruhPeriode()) => ({
+  ...periode,
+  rentang: () => rentangParuh(periode, paruh),
+  judul: () => judulParuh(periode, paruh),
+});
+
+/** Tombol pemilih paruh. `saatUbah(paruhBaru)` dipanggil setiap ganti. */
+export function pilihParuh(saatUbah) {
+  const aktif = paruhPeriode();
+  return el('div.lembar', { style: 'padding:.55rem .9rem;display:flex;gap:.4rem;flex-wrap:wrap;align-items:center' }, [
+    el('span.samar', { style: 'font-size:.85rem;margin-right:.2rem', teks: 'Periode gajian:' }),
+    ...PARUH.map((x) => el(`button.tombol-kecil${x.k === aktif ? '' : '.tombol-samar'}`, {
+      type: 'button',
+      teks: x.l,
+      'aria-pressed': x.k === aktif ? 'true' : 'false',
+      onclick: () => { if (x.k !== paruhPeriode()) { setParuhPeriode(x.k); saatUbah(x.k); } },
+    })),
+  ]);
+}

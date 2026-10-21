@@ -20,6 +20,8 @@ export const HAK = [
   ['revisi', 'Revisi & hapus', 'Boleh mengubah dan menghapus baris yang sudah ada'],
   ['setuju', 'Setujui lembur & premi', 'Boleh menyetujui/menolak sebagai kepala kebun'],
   ['laporan', 'Lihat Laporan Kebun', 'Laporan biaya operasional kebunnya sendiri terhadap target'],
+  ['upah', 'Lihat rincian upah', 'Halaman Payroll & Rekap — upah per pekerja dan biaya per blok/kegiatan. '
+    + 'Tanpa hak ini, angka upah per orang tidak bisa dilihat'],
   ['batal', 'Batalkan persetujuan', 'Boleh membatalkan lembur/premi/log yang telanjur di-acc (kembali jadi menunggu)'],
   ['blok', 'Kelola blok & lahan', 'Admin blok lahan: menambah/mengubah master Blok — nama, luas (ha), divisi, aktif'],
 ];
@@ -171,6 +173,14 @@ export function bolehHalaman(kunci) {
   // Monitoring Semua Divisi menyatukan angka SEMUA divisi dan semua bagian —
   // hanya admin penuh, bukan admin divisi, bukan kepala divisi.
   if (kunci === 'semua') return false;
+  // Rincian upah per pekerja: hanya pemegang hak "Lihat rincian upah".
+  // Kepala divisi cukup menyetujui lembur/premi — tidak perlu tahu gaji
+  // orang per orang. Ringkasan (angka gabungan) tetap terbuka untuk semua.
+  if (kunci === 'payroll' || kunci === 'rekap' || kunci === 'operator') return punyaHak('upah');
+  // Halaman sistem: data terhapus, riwayat perubahan, pengaturan/token.
+  // Riwayat memuat nama siapa menyimpan apa, dan Pengaturan memuat token —
+  // dua-duanya urusan admin.
+  if (kunci === 'terhapus' || kunci === 'riwayat' || kunci === 'sistem') return false;
   if (kunci === 'kebun' || kunci === 'monitor') return bolehLaporan();
   if (kunci === 'beranda') return bolehSetuju() || bolehLaporan();
   if (kunci === 'persetujuan') return bolehSetuju() || bolehBatal();
