@@ -358,7 +358,9 @@ function bangunMenu() {
   const tautan = (kunci, label) => {
     const a = el('a', { href: `#/${kunci}`, teks: label });
     if (kunci === 'persetujuan') {
-      const n = D.state.aplikasi === 'AlatBerat' ? jumlahMenungguAlat() : jumlahMenunggu();
+      // angkanya harus ikut hak divisi, sama seperti isi halamannya
+      const n = D.state.aplikasi === 'AlatBerat'
+        ? jumlahMenungguAlat() : jumlahMenunggu(P.divisiBoleh());
       if (n) a.append(el('span.lencana', { teks: String(n) }));
     }
     return a;

@@ -170,7 +170,7 @@ function isianDivisiKaryawan(baris, divisiBoleh) {
     .sort((a, b) => String(a.nama_divisi).localeCompare(String(b.nama_divisi), 'id'));
 
   const kotak = new Map();
-  const daftar = el('div', { style: 'display:flex;flex-wrap:wrap;gap:.3rem .9rem' },
+  const daftar = el('div', { style: 'display:flex;flex-wrap:wrap;gap:.4rem 1rem' },
     semuaDivisi.map((d) => {
       const id = Number(d.id);
       const terkunci = boleh !== null && !boleh.has(id);
@@ -178,8 +178,11 @@ function isianDivisiKaryawan(baris, divisiBoleh) {
       cb.checked = terpasang.includes(id);
       if (terkunci) cb.disabled = true;
       kotak.set(id, { cb, terkunci });
+      // nowrap: nama panjang seperti "Kantor & Gudang" tidak dipotong jadi
+      // beberapa baris sehingga kotak centangnya ikut melar
       return el('label', {
-        style: `display:flex;gap:.35rem;align-items:center;font-size:.9rem${terkunci ? ';opacity:.55' : ''}`,
+        style: 'display:inline-flex;gap:.35rem;align-items:center;font-size:.9rem;'
+          + `white-space:nowrap${terkunci ? ';opacity:.55' : ''}`,
         title: terkunci ? 'Divisi ini di luar akses Anda — tidak bisa diubah dari sini.' : null,
       }, [cb, d.nama_divisi + (dipakai.has(id) ? ' •' : '')]);
     }));
@@ -216,8 +219,16 @@ function formPanel(namaTabel, baris, saatSelesai, divisiBoleh = null) {
 
   // Karyawan: isian divisi tempelan (disimpan di bagian `web`, bukan kolom
   // database). Boleh lebih dari satu karena ada yang kerja lintas divisi.
+  // Ditaruh TEPAT DI BAWAH NAMA, bukan di ujung form — ini isian penting,
+  // jangan sampai tidak terlihat tanpa menggulung layar.
   const pilihDivisi = namaTabel === 'employees' ? isianDivisiKaryawan(baris, divisiBoleh) : null;
-  const badan = el('div', {}, [tempatGalat, isiForm, pilihDivisi?.elemen || null]);
+  if (pilihDivisi) {
+    const urutNama = def.f.findIndex((f) => f.k === 'nama');
+    const sesudah = isiForm.children[urutNama >= 0 ? urutNama : 0];
+    if (sesudah?.nextSibling) isiForm.insertBefore(pilihDivisi.elemen, sesudah.nextSibling);
+    else isiForm.append(pilihDivisi.elemen);
+  }
+  const badan = el('div', {}, [tempatGalat, isiForm]);
 
   const simpan = async () => {
     const isi = bacaForm(namaTabel, kendali);

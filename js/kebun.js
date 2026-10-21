@@ -826,8 +826,7 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
     const kelompokkan = (daftar) => {
       const peta = new Map();
       for (const r of daftar) {
-        const kunci = [r._tabel, r.employee_id, r.tanggal, r.wage_component_id,
-          r.keterangan_manual || ''].join('|');
+        const kunci = kunciGrupAcc(r);
         if (!peta.has(kunci)) peta.set(kunci, { ...r, _anggota: [r], _blok: new Set() });
         else {
           const g = peta.get(kunci);
@@ -945,12 +944,35 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
 }
 
 /** Jumlah baris yang menunggu — dipakai menu untuk menampilkan lencana angka. */
-export function jumlahMenunggu() {
-  let n = 0;
+/**
+ * Kunci pengelompokan antrean persetujuan: satu lembur/premi yang HK-nya
+ * dibagi ke beberapa blok tersimpan sebagai beberapa baris, tapi hanya butuh
+ * SATU keputusan. Dipakai bersama oleh halaman Persetujuan dan angka
+ * lencananya supaya dua-duanya menghitung hal yang sama.
+ */
+const kunciGrupAcc = (r) => [r._tabel, r.employee_id, r.tanggal,
+  r.wage_component_id, r.keterangan_manual || ''].join('|');
+
+/**
+ * Angka di lencana menu Persetujuan.
+ *
+ * HARUS memakai saringan divisi yang sama dengan halamannya — kalau tidak,
+ * kepala divisi Infra melihat lencana "1" padahal antreannya kosong karena
+ * yang menunggu itu milik divisi Pisang.
+ *
+ * `divisiBoleh` dikirim app.js (null = admin, lihat semua).
+ */
+export function jumlahMenunggu(divisiBoleh = null) {
+  const boleh = typeof divisiBoleh === 'function' ? divisiBoleh() : divisiBoleh;
+  const grup = new Set();
   for (const t of ['lembur_transactions', 'premi_transactions']) {
     for (const r of D.baris(t)) {
-      if (!r.deleted_at && D.menungguPersetujuan(t, r.id)) n++;
+      if (r.deleted_at || !D.menungguPersetujuan(t, r.id)) continue;
+      if (boleh !== null && r.division_id != null && !boleh.includes(Number(r.division_id))) continue;
+      // satu lembur yang dibagi ke 9 blok = 9 baris data, tapi hanya SATU
+      // keputusan — hitung grupnya, bukan barisnya
+      grup.add(kunciGrupAcc({ ...r, _tabel: t }));
     }
   }
-  return n;
+  return grup.size;
 }
