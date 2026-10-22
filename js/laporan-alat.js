@@ -58,8 +58,10 @@ function acuanSemuaPeriode() {
   const hasil = new Map();
   for (const [k, b] of per) {
     hasil.set(k, {
-      ltr_km: b.km > 0 && b.liter > 0 ? b.liter / b.km : null,
-      hm_ltr: b.liter > 0 && b.hm > 0 ? b.hm / b.liter : null,
+      // ALAT BERAT diukur Ltr/HM (liter per jam kerja) — makin KECIL makin irit
+      ltr_hm: b.hm > 0 && b.liter > 0 ? b.liter / b.hm : null,
+      // KENDARAAN diukur KM/Ltr (jarak per liter) — makin BESAR makin irit
+      km_ltr: b.liter > 0 && b.km > 0 ? b.km / b.liter : null,
       hari: b.hari.size,
     });
   }
@@ -67,7 +69,29 @@ function acuanSemuaPeriode() {
 }
 
 export function halamanRingkasanUnit({ periode }) {
-  const { log, solar, servis } = dataPeriode(periode);
+  const wadah = el('section');
+  const gambarUlang = () => taruh(kosongkan(wadah), isiRingkasanUnit(periode, gambarUlang));
+  gambarUlang();
+  return wadah;
+}
+
+// Pilihan "semua periode" diingat selama sesi — satu bulan sering terlalu
+// tipis untuk menilai irit/boros, jadi banyak yang ingin langsung melihat
+// angka sejak awal pencatatan.
+const KUNCI_SEMUA = 'app.unit.semua';
+const semuaPeriodeAktif = () => sessionStorage.getItem(KUNCI_SEMUA) === '1';
+
+function isiRingkasanUnit(periode, gambarUlang) {
+  const semuaPeriode = semuaPeriodeAktif();
+  const judulPeriode = () => (semuaPeriode ? 'semua periode' : periode.judul());
+  // "semua periode" = tanpa saringan tanggal sama sekali
+  const { log, solar, servis } = semuaPeriode
+    ? {
+      log: D.baris('work_logs').filter((r) => !r.deleted_at && D.disetujui('work_logs', r.id)),
+      solar: D.baris('fuel_logs').filter((r) => !r.deleted_at),
+      servis: D.baris('service_logs').filter((r) => !r.deleted_at),
+    }
+    : dataPeriode(periode);
   const acuan = acuanSemuaPeriode();
 
   const per = new Map();
@@ -100,28 +124,25 @@ export function halamanRingkasanUnit({ periode }) {
   for (const r of servis) ambil(r.unit_id).biaya_servis += Number(r.biaya) || 0;
 
   const data = [...per.entries()].map(([unitId, b]) => {
-    // Tanpa catatan solar, efisiensinya belum bisa dihitung — jangan tampilkan 0
-    const ltr_km = b.km > 0 && b.liter > 0 ? b.liter / b.km : null;
-    const hm_ltr = b.liter > 0 && b.hm > 0 ? b.hm / b.liter : null;
+    // Satuannya mengikuti jenis unitnya:
+    //   ALAT BERAT  -> Ltr/HM  (liter per jam kerja), makin KECIL makin irit
+    //   KENDARAAN   -> KM/Ltr  (jarak per liter),     makin BESAR makin irit
+    // Tanpa catatan solar, efisiensinya belum bisa dihitung — jangan tampilkan 0.
+    const ltr_hm = b.hm > 0 && b.liter > 0 ? b.liter / b.hm : null;
+    const km_ltr = b.liter > 0 && b.km > 0 ? b.km / b.liter : null;
     const a = acuan.get(Number(unitId)) || {};
-    // Ltr/KM: makin KECIL makin irit. HM/Ltr: makin BESAR makin irit.
     let banding = '–';
-    if (ltr_km != null && a.ltr_km != null) {
-      const selisih = ltr_km - a.ltr_km;
-      banding = Math.abs(selisih) < 0.005 ? 'sama'
-        : `${selisih < 0 ? '↓' : '↑'} ${angka(Math.abs(selisih), 2)}`;
-    } else if (hm_ltr != null && a.hm_ltr != null) {
-      const selisih = hm_ltr - a.hm_ltr;
-      banding = Math.abs(selisih) < 0.005 ? 'sama'
-        : `${selisih > 0 ? '↓' : '↑'} ${angka(Math.abs(selisih), 2)}`;
-    }
+    const tanda = (selisih, kecilLebihBaik) => (Math.abs(selisih) < 0.005 ? 'sama'
+      : `${(kecilLebihBaik ? selisih < 0 : selisih > 0) ? '↓' : '↑'} ${angka(Math.abs(selisih), 2)}`);
+    if (ltr_hm != null && a.ltr_hm != null) banding = tanda(ltr_hm - a.ltr_hm, true);
+    else if (km_ltr != null && a.km_ltr != null) banding = tanda(km_ltr - a.km_ltr, false);
     return {
       ...b,
       hari_operasi: b.hari.size,
-      ltr_km,
-      hm_ltr,
-      std_ltr_km: a.ltr_km ?? null,
-      std_hm_ltr: a.hm_ltr ?? null,
+      ltr_hm,
+      km_ltr,
+      std_ltr_hm: a.ltr_hm ?? null,
+      std_km_ltr: a.km_ltr ?? null,
       banding,
       total_biaya: b.biaya_solar + b.biaya_servis,
     };
@@ -149,7 +170,17 @@ export function halamanRingkasanUnit({ periode }) {
     el('section', {}, [
       el('div.lembar', {}, [
         el('div.lembar-kepala', {}, [
-          el('h2', { teks: `Per unit — ${periode.judul()}` }),
+          el('h2', { teks: `Per unit — ${judulPeriode()}` }),
+          // Pindah antara bulan terpilih dan SEMUA periode sejak awal
+          el(`button.tombol-kecil${semuaPeriode ? '' : '.tombol-samar'}`, {
+            type: 'button',
+            teks: semuaPeriode ? `Lihat ${periode.judul()} saja` : 'Lihat semua periode',
+            'aria-pressed': semuaPeriode ? 'true' : 'false',
+            onclick: () => {
+              sessionStorage.setItem(KUNCI_SEMUA, semuaPeriode ? '0' : '1');
+              gambarUlang();
+            },
+          }),
           el('button.tombol-samar.tombol-kecil', { type: 'button', teks: 'Cetak', onclick: () => window.print() }),
         ]),
         el('div.lembar-isi', {}, [
@@ -163,23 +194,30 @@ export function halamanRingkasanUnit({ periode }) {
             { l: 'Liter', k: 'liter', jenis: 'angka', pecahan: 1, total: true },
             { l: 'Biaya solar (Rp)', k: 'biaya_solar', jenis: 'uang', total: true },
             { l: 'Biaya servis (Rp)', k: 'biaya_servis', jenis: 'uang', total: true },
-            { l: 'Ltr/KM', nilai: (r) => (r.ltr_km == null ? '–' : angka(r.ltr_km, 2)), rata: 'angka' },
-            { l: 'HM/Ltr', nilai: (r) => (r.hm_ltr == null ? '–' : angka(r.hm_ltr, 2)), rata: 'angka' },
-            // Pembanding sepanjang masa — supaya terlihat bulan ini lebih
+            // ALAT BERAT dinilai Ltr/HM, KENDARAAN dinilai KM/Ltr
+            { l: 'Ltr/HM', nilai: (r) => (r.ltr_hm == null ? '–' : angka(r.ltr_hm, 2)), rata: 'angka' },
+            { l: 'KM/Ltr', nilai: (r) => (r.km_ltr == null ? '–' : angka(r.km_ltr, 2)), rata: 'angka' },
+            // Pembanding sepanjang masa — supaya terlihat periode ini lebih
             // irit atau lebih boros dari kebiasaan unit itu sendiri.
-            { l: 'Ltr/KM standar', rata: 'angka',
-              nilai: (r) => (r.std_ltr_km == null ? '–' : angka(r.std_ltr_km, 2)) },
-            { l: 'HM/Ltr standar', rata: 'angka',
-              nilai: (r) => (r.std_hm_ltr == null ? '–' : angka(r.std_hm_ltr, 2)) },
-            { l: 'Selisih', rata: 'angka', nilai: (r) => r.banding },
-          ], data, { kosong: `Belum ada kegiatan unit pada ${periode.judul()}.` }),
+            ...(semuaPeriode ? [] : [
+              { l: 'Ltr/HM standar', rata: 'angka',
+                nilai: (r) => (r.std_ltr_hm == null ? '–' : angka(r.std_ltr_hm, 2)) },
+              { l: 'KM/Ltr standar', rata: 'angka',
+                nilai: (r) => (r.std_km_ltr == null ? '–' : angka(r.std_km_ltr, 2)) },
+              { l: 'Selisih', rata: 'angka', nilai: (r) => r.banding },
+            ]),
+          ], data, { kosong: `Belum ada kegiatan unit pada ${judulPeriode()}.` }),
           el('p.bantuan', {
-            teks: 'Ltr/KM dipakai untuk dump truck & kendaraan (makin kecil makin irit). '
-              + 'HM/Ltr dipakai untuk alat berat (makin besar makin irit). '
-              + 'Kolom "standar" dihitung dari SELURUH periode yang pernah tercatat, '
-              + 'jadi bisa dipakai menilai apakah bulan ini lebih irit atau lebih boros '
-              + 'dari kebiasaan unit itu sendiri. Kolom Selisih memakai tanda: '
-              + '↓ lebih irit, ↑ lebih boros.',
+            teks: 'Ltr/HM dipakai untuk ALAT BERAT — liter solar per jam kerja '
+              + '(makin kecil makin irit). KM/Ltr dipakai untuk KENDARAAN — jarak per '
+              + 'liter (makin besar makin irit). '
+              + (semuaPeriode
+                ? 'Sedang menampilkan SELURUH periode sejak awal pencatatan, jadi angkanya '
+                  + 'paling bisa dipercaya untuk menilai efisiensi.'
+                : 'Kolom "standar" dihitung dari SELURUH periode yang pernah tercatat, jadi '
+                  + 'bisa dipakai menilai apakah bulan ini lebih irit atau lebih boros dari '
+                  + 'kebiasaan unit itu sendiri. Kolom Selisih memakai tanda: ↓ lebih irit, '
+                  + '↑ lebih boros.'),
           }),
         ]),
       ]),
