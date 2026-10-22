@@ -324,7 +324,9 @@ export function halamanLaporanKebun({ periode, gambar, hak }) {
     for (const x of b.hk) tambahBlok(x.block_id, Number(x.hk) || 0, Number(x.nominal) || 0);
     for (const x of [...b.borongan, ...b.lembur, ...b.premi]) tambahBlok(x.block_id, 0, Number(x.nominal) || 0);
     const barisBlok = [...perBlok.entries()]
-      .map(([id, x]) => ({ blok: id ? D.labelRef('blocks', id) : '(tanpa blok)', ...x }))
+      // nama blok dihitung pada AKHIR periode yang dilihat, bukan hari ini,
+      // supaya laporan bulan lama tidak ikut maju siklusnya
+      .map(([id, x]) => ({ blok: id ? D.labelBlokPada(id, r.sampai) : '(tanpa blok)', ...x }))
       .sort((a, z) => z.rp - a.rp);
 
     // rincian per kegiatan (HK saja — lembur/premi tidak punya kolom kegiatan)
@@ -941,7 +943,7 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
             { l: 'Pekerja', nilai: (r) => D.labelRef('employees', r.employee_id) },
             { l: 'Blok', nilai: (r) => (r._blok?.size > 1
               ? `${r._blok.size} blok (dibagi)`
-              : (r.block_id ? D.labelRef('blocks', r.block_id) : '–')) },
+              : (r.block_id ? D.labelBlokPada(r.block_id, r.tanggal) : '–')) },
             { l: 'Jumlah', nilai: (r) => `${angka(r.qty, 2)} ${r.satuan || ''}`.trim() },
             { l: 'Keterangan', nilai: (r) => r.keterangan_manual || r.catatan || '–' },
             { l: 'Nilai (Rp)', k: 'nominal', jenis: 'uang', total: true },

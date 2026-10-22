@@ -438,7 +438,11 @@ function lembarRekap(judul, data, labelKolom) {
 
 export function halamanRekap({ periode }) {
   const perDivisi = rekapMenurut(periode, (r) => r.division_id, (id) => D.labelRef('divisions', id));
-  const perBlok = rekapMenurut(periode, (r) => r.block_id, (id) => D.labelRef('blocks', id));
+  // nama blok dihitung pada AKHIR periode yang dilihat, supaya rekap bulan
+  // lama tidak ikut berganti siklus saat dicetak ulang hari ini
+  const akhirPeriode = periode.rentang()[1];
+  const perBlok = rekapMenurut(periode, (r) => r.block_id,
+    (id) => D.labelBlokPada(id, akhirPeriode));
   const perKegiatan = rekapMenurut(
     periode,
     (r, jenis) => (jenis === 'hk' || jenis === 'borongan' ? r.activity_id : null),

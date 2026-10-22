@@ -108,7 +108,7 @@ export const JENIS = {
     ringkas: (b) => [
       { l: 'Tanggal', nilai: (r) => ftanggal(r.isi.tanggal) },
       { l: 'Pekerja', nilai: (r) => D.labelRef('employees', r.isi.employee_id) },
-      { l: 'Blok', nilai: (r) => D.labelRef('blocks', r.isi.block_id) },
+      { l: 'Blok', nilai: (r) => D.labelBlokPada(r.isi.block_id, r.isi.tanggal) },
       { l: 'Bagi', nilai: (r) => r.bagi || '–' },
       { l: 'Jenis', nilai: (r) => D.labelRef('job_types', r.isi.job_type_id) },
       // nilai mentah — pemformatannya diurus oleh jenis:'hk' di tabel()
@@ -553,8 +553,18 @@ export const JENIS = {
       }
       if (salah.length) return { salah };
 
-      // kode blok yang sudah ada -> diperbarui, bukan dibuat ganda
-      const ada = D.baris('blocks').find((r) => !r.deleted_at && samakan(r.kode_blok) === samakan(kode));
+      // kode blok yang sudah ada -> diperbarui, bukan dibuat ganda.
+      // Kalau kodenya cocok ke LEBIH DARI SATU baris master (mis. "D11" dan
+      // "d11" dua-duanya ada), impor TIDAK menebak salah satu — barisnya
+      // ditolak supaya yang kembar dibereskan dulu di Master Blok.
+      const cocok = D.baris('blocks')
+        .filter((r) => !r.deleted_at && samakan(r.kode_blok) === samakan(kode));
+      if (cocok.length > 1) {
+        return { salah: [`Kode blok "${kode}" cocok ke ${cocok.length} blok di master `
+          + `(${cocok.map((r) => `"${r.kode_blok}"`).join(', ')}). `
+          + 'Hapus atau betulkan yang kembar dulu di Master Blok, baru impor lagi.'] };
+      }
+      const ada = cocok[0] || null;
       // nama dasar: akhiran siklus yang dulu diketik manual dibuang kalau
       // tanggal tanamnya diisi, supaya tidak jadi "A01 (R1) (R2)"
       const namaMentah = rapi(baris['Nama blok']) || ada?.nama_blok || kode;

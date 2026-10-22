@@ -10,6 +10,7 @@
 import { bukaAmplop, kunciAmplop } from './kunci.js';
 import * as gh from './github.js';
 import { unduhTeks } from './ui.js';
+import { namaBlokSiklus } from './siklus.js';
 
 const KUNCI_NAMA = 'app.nama';
 const KUNCI_PATH = 'app.path';
@@ -48,6 +49,61 @@ export function labelRef(tabelRef, id) {
   if (!r) return id == null || id === '' ? '' : `#${id} (tidak ada)`;
   const def = state.labelTabel[tabelRef];
   return def?.label?.(r) ?? String(id);
+}
+
+/**
+ * Nama blok SEPERTI SAAT ITU, bukan seperti hari ini.
+ *
+ * Nama blok pisang ikut umur tanamannya, jadi kalau laporan lama dicetak
+ * sekarang nama bloknya bisa ikut maju sendiri — blok yang bulan Januari
+ * masih R1 jadi tertulis R2. Untuk laporan biaya per siklus itu salah.
+ * Baris laporan karena itu memakai tanggal barisnya sendiri (atau tanggal
+ * akhir periode untuk angka yang sudah dijumlah), bukan tanggal hari ini.
+ *
+ * Tanpa `tanggal` hasilnya sama dengan labelRef('blocks', id).
+ */
+export function labelBlokPada(blockId, tanggal) {
+  const r = cari('blocks', blockId);
+  if (!r) return labelRef('blocks', blockId);
+  const acuan = /^\d{4}-\d{2}-\d{2}$/.test(String(tanggal || '')) ? tanggal : undefined;
+  return namaBlokSiklus(r.nama_blok, tanamBlok(r.id), acuan);
+}
+
+/**
+ * Blok yang dipilih ini milik komoditas/divisi LAIN?
+ *
+ * Kejadiannya nyata: admin Infrastruktur atau Padi input ke blok pisang,
+ * jadi biayanya nempel ke divisi yang salah dan laporan pisang bolong.
+ * Bukan dilarang — divisi memang saling bantu — tapi harus kelihatan dulu
+ * sebelum disimpan.
+ *
+ * Mengembalikan daftar blok yang tidak sepadan:
+ *   [{ kode, divisiBlok, komoditasBlok }]
+ * Kosong berarti tidak ada yang perlu diperingatkan.
+ */
+export function blokLainKomoditas(divisionId, blockIds) {
+  const divIni = Number(divisionId) || 0;
+  if (!divIni) return [];
+  const namaDivIni = String(cari('divisions', divIni)?.nama_divisi || '');
+  const hasil = [];
+  for (const id of (Array.isArray(blockIds) ? blockIds : [blockIds])) {
+    if (id == null || id === '') continue;
+    const b = cari('blocks', id);
+    if (!b) continue;
+    const divBlok = Number(b.division_id) || 0;
+    if (!divBlok || divBlok === divIni) continue;
+    const kom = String(b.komoditas || '').trim();
+    // Kalau komoditas blok sama dengan nama divisi yang sedang input, anggap
+    // masih sepadan (mis. divisi "Pisang" input blok berkomoditas "Pisang"
+    // yang kebetulan tercatat di divisi lain).
+    if (kom && namaDivIni && kom.toLowerCase() === namaDivIni.toLowerCase()) continue;
+    hasil.push({
+      kode: b.kode_blok,
+      divisiBlok: labelRef('divisions', divBlok),
+      komoditasBlok: kom,
+    });
+  }
+  return hasil;
 }
 
 /**
@@ -154,7 +210,7 @@ export function web() {
 // ------------------------------------------------ tanggal tanam tiap blok
 // Tabel `blocks` di database desktop tidak punya kolom tanggal tanam, jadi
 // disimpan di bagian `web` (khusus situs, ikut terbawa saat Kirim/Tarik).
-// Dipakai menghitung umur tanaman (MST) dan siklus R0/R1/R2/R3.
+// Dipakai menghitung umur tanaman (MST) dan siklus PC/R1/R2/R3/R4.
 
 export const tanamBlok = (blockId) => web().tanamBlok?.[String(blockId)] || null;
 

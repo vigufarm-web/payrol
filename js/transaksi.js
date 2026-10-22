@@ -215,6 +215,34 @@ function bagianTambahan(kategori, satuanBawaan) {
   };
 }
 
+/**
+ * Blok yang dipilih milik komoditas/divisi lain? Tanya dulu sebelum lanjut.
+ *
+ * Kejadiannya nyata: admin Infrastruktur atau Padi input ke blok pisang.
+ * Tidak dilarang — divisi memang saling bantu — tapi biayanya akan nempel
+ * ke divisi yang sedang dipilih, bukan ke divisi blok itu, jadi kalau tidak
+ * disadari laporan divisi blok itu jadi bolong.
+ *
+ * Mengembalikan true kalau boleh lanjut (tidak ada yang beda, atau
+ * pengisinya sudah menyetujui).
+ */
+async function tanyaKomoditas(divisionId, blockIds) {
+  const lain = D.blokLainKomoditas(divisionId, blockIds);
+  if (!lain.length) return true;
+  const namaDiv = D.labelRef('divisions', divisionId);
+  return tanya(lain.length === 1
+    ? `Blok ${lain[0].kode} bukan blok ${namaDiv}`
+    : `${lain.length} blok yang dipilih bukan blok ${namaDiv}`,
+  el('div', {}, [
+    el('ul', {}, lain.slice(0, 8).map((x) => el('li', {
+      teks: `${x.kode} — milik ${x.divisiBlok}${x.komoditasBlok ? ` (${x.komoditasBlok})` : ''}`,
+    }))),
+    lain.length > 8 ? el('p.bantuan', { teks: `…dan ${lain.length - 8} lagi.` }) : null,
+    el('p', { teks: `Upahnya akan tercatat sebagai biaya ${namaDiv}, bukan biaya divisi blok `
+      + 'itu. Kalau ini memang saling bantu, lanjutkan saja.' }),
+  ]), { ya: 'Ya, lanjutkan', tidak: 'Batal, saya betulkan' });
+}
+
 function formHK(barisAda, tgl, saatSelesai) {
   const tempatGalat = el('div');
   const hitungan = el('p.bantuan.hitungan-hk', { teks: ' ' });
@@ -222,6 +250,9 @@ function formHK(barisAda, tgl, saatSelesai) {
   // sebelum disimpan, supaya pengisi tahu sisanya tinggal berapa. Yang
   // melewati batas HK ditolak saat menyimpan; yang masih muat tetap boleh.
   const catatanLintas = el('div');
+  // Peringatan "blok ini milik komoditas lain" — mis. admin Infra atau Padi
+  // input ke blok pisang. Tidak dilarang, tapi harus dilihat dulu.
+  const catatanKomoditas = el('div');
 
   const inTanggal = el('input', { type: 'date', nilai: barisAda?.tanggal || tgl || hariIni() });
   const inKaryawan = pilihanCari(
@@ -437,6 +468,24 @@ function formHK(barisAda, tgl, saatSelesai) {
         + `  ·  HK terpakai hari itu: ${fhk(terpakai)} dari ${fhk(D.maksHkPerHari())}`
       : 'Pilih pekerja dulu untuk melihat perhitungan upahnya.';
     perbaruiCatatanLintas(emp);
+    perbaruiCatatanKomoditas();
+  };
+
+  /** Blok yang dipilih milik komoditas lain? Tampil langsung di form. */
+  const perbaruiCatatanKomoditas = () => {
+    kosongkan(catatanKomoditas);
+    const lain = D.blokLainKomoditas(inDivisi.value, blokTerpilih());
+    if (!lain.length) return;
+    catatanKomoditas.append(el('div.petunjuk', { role: 'alert' }, [
+      el('strong', { teks: lain.length === 1
+        ? `Blok ${lain[0].kode} bukan blok ${D.labelRef('divisions', inDivisi.value)}.`
+        : `${lain.length} blok yang dipilih bukan blok ${D.labelRef('divisions', inDivisi.value)}.` }),
+      el('p', { style: 'margin:.25rem 0 0',
+        teks: `${lain.map((x) => `${x.kode} milik ${x.divisiBlok}`
+          + (x.komoditasBlok ? ` (${x.komoditasBlok})` : '')).join(', ')}. `
+          + 'Boleh saja kalau memang saling bantu, tapi biayanya akan masuk ke '
+          + `${D.labelRef('divisions', inDivisi.value)} — bukan ke divisi blok itu.` }),
+    ]));
   };
 
   /** Di mana saja orang ini sudah tercatat pada tanggal itu — divisi lain di
@@ -604,6 +653,11 @@ function formHK(barisAda, tgl, saatSelesai) {
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); badan.scrollTop = 0; return; }
 
+    // Blok milik komoditas/divisi lain (mis. admin Infra atau Padi input ke
+    // blok pisang): boleh, tapi harus disadari dulu karena biayanya nempel
+    // ke divisi yang sedang dipilih, bukan ke divisi blok itu.
+    if (!await tanyaKomoditas(inDivisi.value, rencana.map((x) => x.block_id))) return;
+
     // Sudah ada kerjaan di bagian lain hari itu dan masih di bawah batas:
     // itu wajar (saling bantu antar bagian), jadi jalan terus — cukup
     // diberi tahu sekilas. Yang melewati batas sudah ditolak di atas.
@@ -745,6 +799,7 @@ function formHK(barisAda, tgl, saatSelesai) {
     tempatTabelBlok,
     hitungan,
     catatanLintas,
+    catatanKomoditas,
     isian('Keterangan pekerjaan', inJob),
     isian('Catatan', inCatatan),
     bagianLembur ? bagianLembur.elemen : null,
@@ -1073,6 +1128,8 @@ function formMassal(tgl, saatSelesai) {
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); badan.scrollTop = 0; return; }
 
+    // Blok milik komoditas/divisi lain — tanya dulu (lihat tanyaKomoditas).
+    if (!await tanyaKomoditas(inDivisi.value, blok)) return;
 
     // Yang lewat batas sudah DITOLAK di atas. Sisanya masih dalam batas —
     // saling bantu antar bagian itu wajar, cukup diberi tahu sekilas.
@@ -1348,7 +1405,7 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
       tabel([
         { l: 'Pekerja', nilai: (r) => D.labelRef('employees', r.employee_id) },
         { l: 'Divisi', nilai: (r) => D.labelRef('divisions', r.division_id) },
-        { l: 'Blok', nilai: (r) => D.labelRef('blocks', r.block_id) },
+        { l: 'Blok', nilai: (r) => D.labelBlokPada(r.block_id, r.tanggal) },
         { l: 'Kegiatan', nilai: (r) => D.labelRef('activities', r.activity_id) },
         { l: 'Jenis', nilai: (r) => D.labelRef('job_types', r.job_type_id) },
         { l: 'HK', k: 'hk', jenis: 'hk', total: true },
@@ -1455,7 +1512,7 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
   inQty.addEventListener('input', perbarui);
   perbarui();
 
-  const simpan = () => {
+  const simpan = async () => {
     const emp = D.cari('employees', inKaryawan.nilaiTerpilih());
     const kom = D.cari('wage_components', inKomponen.value);
     const salah = [];
@@ -1484,11 +1541,15 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
     if (inBlok.value && !blok) {
       salah.push('Blok yang dipilih sudah tidak ada di Master Blok. Pilih yang lain.');
     }
-    if (blok && inDivisi.value && String(blok.division_id) !== String(inDivisi.value)) {
-      salah.push('Blok yang dipilih bukan bagian dari divisi itu.');
-    }
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); badan.scrollTop = 0; return; }
+
+    // Blok milik divisi/komoditas lain DULU ditolak keras di sini. Sekarang
+    // hanya diperingatkan: divisi memang saling bantu (mis. Infra atau Padi
+    // bantu di blok pisang), dan ada blok yang divisinya di master memang
+    // belum sesuai lapangan. Yang penting pengisinya sadar biayanya nempel
+    // ke divisi yang sedang dipilih.
+    if (!await tanyaKomoditas(inDivisi.value, [inBlok.value])) return;
 
     const tarif = tarifIsi;
     const isi = {
@@ -1576,7 +1637,7 @@ function lembarTransaksi(namaTabel, kategori, prefix, periode, gambar, bisaEdit)
       { l: 'Komponen', nilai: (r) => D.labelRef('wage_components', r.wage_component_id) },
       { l: 'Jumlah', k: 'qty', jenis: 'angka', pecahan: 2 },
       { l: 'Satuan', k: 'satuan' },
-      { l: 'Blok', nilai: (r) => (r.block_id ? D.labelRef('blocks', r.block_id) : '–') },
+      { l: 'Blok', nilai: (r) => (r.block_id ? D.labelBlokPada(r.block_id, r.tanggal) : '–') },
       { l: 'Upah (Rp)', k: 'nominal', jenis: 'uang', total: true },
     ], data, {
       kosong: `Belum ada ${kategori.toLowerCase()} pada ${periode.judul()}.`,

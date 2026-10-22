@@ -6,6 +6,7 @@ import * as D from './data.js';
 import { mst, siklusBlok, dasarNamaBlok, SIKLUS } from './siklus.js';
 import {
   el, tabel, isian, pilihan, kesalahan, panel, tanya, pesan, kosongkan, taruh, angka,
+  rupiahPenuh,
 } from './ui.js';
 
 const TERSEMBUNYI = '••••••';
@@ -153,7 +154,7 @@ function periksa(namaTabel, isi, idSekarang) {
 }
 
 /**
- * Blok ini kebun pisang yang ditanam? Siklus R0/R1/R2/R3 hanya untuk
+ * Blok ini kebun pisang yang ditanam? Siklus PC/R1/R2/R3/R4 hanya untuk
  * komoditas pisang — padi dan divisi lain tetap seperti semula.
  *
  * Di daftar blok bercampur dua macam isi: BLOK TANAM (A01, A02, …) dan
@@ -195,15 +196,17 @@ function isianTanamBlok(baris, ambilDivisi, ambilKomoditas) {
         + 'nama bloknya tetap apa adanya, tanpa siklus.'
       : m == null ? 'Tanggal tanam belum lewat, umurnya belum bisa dihitung.'
         : `Umur ${m} MST · siklus ${sk.label}`
-          + (dasar ? ` · nama blok tampil sebagai "${dasar} (${sk.kode === 'R0' ? 'Indukan' : sk.kode})"` : '');
+          + (dasar ? ` · nama blok tampil sebagai "${dasar} (${sk.kode})"` : '');
   };
   inTgl.addEventListener('input', perbarui);
   perbarui();
 
   taruh(bungkus, isian('Tanggal tanam', inTgl, {
     bantuan: 'Dipakai menghitung umur (MST) dan siklus: '
-      + SIKLUS.map((x) => `${x.label} minggu ${x.dari}–${x.sampai}`).join(', ')
-      + '. Lewat minggu 169 ditandai "lewat R3".',
+      + SIKLUS.map((x) => (x.sampai == null
+        ? `${x.kode} minggu ${x.dari} ke atas`
+        : `${x.kode} minggu ${x.dari}–${x.sampai}`)).join(', ')
+      + '. Umurnya dihitung sama dengan rumus di berkas Monitoring Kebun Pisang.',
   }), hasil);
 
   return {
@@ -555,6 +558,16 @@ export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus, hak }) {
         'Tampilkan data pribadi',
       ])
       : null,
+    // Alat sekali pakai: blok yang terpecah karena siklusnya dulu diketik
+    // tangan jadi bagian nama ("A04", "A04 (R1)", "A04 (R2)") disatukan.
+    // Hanya muncul kalau memang ada yang kembar, dan hanya untuk admin.
+    namaTabel === 'blocks' && bisaEdit() && hak?.admin?.() && blokKembar().length
+      ? el('button.tombol-samar', {
+        type: 'button', teks: `Gabungkan ${blokKembar().length} blok kembar`,
+        title: 'Blok yang namanya dulu diketik pakai akhiran siklus disatukan ke kode dasarnya',
+        onclick: () => gabungBlokKembar(() => { gambarTabel(); gambar(); }),
+      })
+      : null,
     bisaEdit()
       ? el('button.tombol-utama', {
         type: 'button', teks: `Tambah ${def.tunggal}`,
@@ -572,6 +585,153 @@ export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus, hak }) {
     ]));
   }
   return wadah;
+}
+
+/**
+ * Blok yang terpecah karena siklusnya dulu diketik tangan jadi bagian nama.
+ *
+ * Dulu kebun mengetik sendiri "A04 (R1)" dan "A04 (R2)" sebagai blok
+ * TERPISAH, padahal itu satu blok yang sama. Akibatnya biaya satu blok
+ * tersebar ke beberapa baris, dan akhirannya pun tidak selalu cocok dengan
+ * tanggal transaksinya — orang pilih mana saja yang muncul di daftar.
+ *
+ * Sekarang siklus dihitung sendiri dari tanggal tanam, jadi baris kembar itu
+ * tidak perlu lagi. Yang dikembalikan: daftar { baris, dasar } untuk tiap
+ * blok kembar yang blok dasarnya memang ada.
+ */
+export function blokKembar() {
+  const aktif = D.aktif('blocks');
+  const olehKode = new Map();
+  for (const x of aktif) olehKode.set(String(x.kode_blok).trim().toLowerCase(), x);
+  const hasil = [];
+  for (const x of aktif) {
+    const dasar = dasarNamaBlok(x.kode_blok);
+    if (dasar === String(x.kode_blok).trim()) continue;
+    const tujuan = olehKode.get(dasar.toLowerCase());
+    if (!tujuan || Number(tujuan.id) === Number(x.id)) continue;
+    hasil.push({ baris: x, dasar: tujuan });
+  }
+  return hasil;
+}
+
+const TABEL_TRANSAKSI = ['daily_payroll', 'borongan_transactions',
+  'lembur_transactions', 'premi_transactions'];
+
+/** Jumlah baris & rupiah yang menempel ke satu blok. */
+function pemakaiBlok(blockId) {
+  let n = 0; let rp = 0;
+  for (const nm of TABEL_TRANSAKSI) {
+    for (const r of D.baris(nm)) {
+      if (r.deleted_at || Number(r.block_id) !== Number(blockId)) continue;
+      n += 1; rp += Number(r.nominal) || 0;
+    }
+  }
+  return { n, rp };
+}
+
+/**
+ * Satukan blok kembar ke kode dasarnya.
+ *
+ * Transaksinya dipindah, baris kembarnya dihapus (lunak, jadi masih bisa
+ * dilihat di Terhapus). Jumlah baris dan total rupiah TIDAK boleh berubah —
+ * kalau berubah, perubahannya dibatalkan dan tidak ada yang disimpan.
+ */
+export async function gabungBlokKembar(saatSelesai) {
+  const kembar = blokKembar();
+  if (!kembar.length) {
+    pesan('Tidak ada blok kembar.', 'info');
+    return;
+  }
+  const rinci = kembar.map((k) => ({ ...k, ...pemakaiBlok(k.baris.id) }));
+  const totalN = rinci.reduce((a, x) => a + x.n, 0);
+  const totalRp = rinci.reduce((a, x) => a + x.rp, 0);
+  const perDasar = new Map();
+  for (const x of rinci) {
+    const k = x.dasar.kode_blok;
+    const v = perDasar.get(k) || { n: 0, rp: 0, dari: [] };
+    v.n += x.n; v.rp += x.rp; v.dari.push(x.baris.kode_blok);
+    perDasar.set(k, v);
+  }
+
+  const setuju = await tanya(`Gabungkan ${kembar.length} blok kembar`, el('div', {}, [
+    el('p', { teks: 'Blok ini dulu dibuat terpisah karena siklusnya diketik jadi bagian nama. '
+      + 'Sekarang siklus dihitung sendiri dari tanggal tanam, jadi barisnya disatukan ke '
+      + 'kode dasarnya.' }),
+    el('table.tabel-rapat', {}, [
+      el('thead', {}, [el('tr', {}, [
+        el('th', { teks: 'Jadi' }), el('th', { teks: 'Dari' }),
+        el('th', { teks: 'Baris' }), el('th', { teks: 'Nilai' })])]),
+      el('tbody', {}, [...perDasar.entries()].map(([k, v]) => el('tr', {}, [
+        el('td', { teks: k }),
+        el('td', { teks: v.dari.join(', ') }),
+        el('td', { teks: String(v.n) }),
+        el('td', { teks: rupiahPenuh(v.rp) }),
+      ]))),
+    ]),
+    el('p', { teks: `Seluruhnya ${totalN} baris senilai ${rupiahPenuh(totalRp)} dipindah. `
+      + 'Totalnya tidak berubah — hanya menempel ke blok yang benar. Sesudah ini siklus tiap '
+      + 'baris dihitung dari tanggal tanam dan tanggal baris itu sendiri.' }),
+    el('p.bantuan', { teks: 'Baris blok yang kembar dihapus dari Master Blok sesudah '
+      + 'transaksinya kosong — ini TIDAK bisa dibatalkan. Transaksinya sendiri tidak ada '
+      + 'yang hilang, hanya berpindah ke blok dasarnya. Kalau jumlah baris atau totalnya '
+      + 'sampai berubah, semuanya dibatalkan dan tidak ada yang dihapus.' }),
+  ]), { ya: 'Ya, gabungkan', tidak: 'Batal' });
+  if (!setuju) return;
+
+  // ---- hitung dulu keadaan sebelum, supaya bisa diperiksa sesudahnya
+  const hitungSemua = () => {
+    let n = 0; let rp = 0;
+    for (const nm of TABEL_TRANSAKSI) {
+      for (const r of D.baris(nm)) {
+        if (r.deleted_at) continue;
+        n += 1; rp += Number(r.nominal) || 0;
+      }
+    }
+    return { n, rp };
+  };
+  const sebelum = hitungSemua();
+
+  const tujuanDari = new Map(kembar.map((k) => [Number(k.baris.id), Number(k.dasar.id)]));
+  const batalkan = [];
+  try {
+    for (const nm of TABEL_TRANSAKSI) {
+      for (const r of D.baris(nm)) {
+        if (r.deleted_at || !r.block_id) continue;
+        const ke = tujuanDari.get(Number(r.block_id));
+        if (ke == null) continue;
+        batalkan.push([nm, r.id, { ...r }]);
+        D.ubah(nm, r.id, { ...r, block_id: ke });
+      }
+    }
+    const sesudah = hitungSemua();
+    if (sesudah.n !== sebelum.n || sesudah.rp !== sebelum.rp) {
+      throw new Error(`jumlah berubah: ${sebelum.n}/${sebelum.rp} -> ${sesudah.n}/${sesudah.rp}`);
+    }
+    // Baru sesudah yakin totalnya utuh, baris kembarnya dihapus. Dihapus
+    // KERAS, karena hapus lunak hanya berlaku untuk tabel transaksi —
+    // baris master yang cuma ditandai deleted_at tetap ikut muncul di
+    // semua daftar pilihan (lihat barisAktif di data.js). Sebelum dihapus,
+    // dipastikan satu per satu benar-benar sudah tidak dipakai.
+    for (const k of kembar) {
+      const sisa = pemakaiBlok(k.baris.id);
+      if (sisa.n) {
+        throw new Error(`blok ${k.baris.kode_blok} masih dipakai ${sisa.n} baris`);
+      }
+    }
+    for (const k of kembar) {
+      D.setTanamBlok(k.baris.id, null);
+      D.hapus('blocks', k.baris.id);
+    }
+  } catch (e) {
+    for (const [nm, id, isi] of batalkan.reverse()) D.ubah(nm, id, isi);
+    pesan(`Gagal menggabungkan, tidak ada yang diubah — ${e.message}`, 'galat', 12);
+    return;
+  }
+
+  pesan(`${kembar.length} blok kembar digabungkan. ${totalN} baris senilai `
+    + `${rupiahPenuh(totalRp)} sekarang menempel ke blok dasarnya. `
+    + 'Jangan lupa Simpan supaya ikut terkirim.', 'sukses', 12);
+  saatSelesai?.();
 }
 
 /** Dipakai halaman master: hapus satu baris setelah memastikan tidak dipakai. */

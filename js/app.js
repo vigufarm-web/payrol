@@ -584,7 +584,11 @@ export function gambar() {
   const bisaUbahTransaksi = () => bisaEdit() && (P.bolehInput() || P.bolehRevisi());
   const konteks = {
     periode, gambar, bisaEdit: bisaUbahTransaksi, simpanSekarang, muatUlangData, kamus: m.kamus,
-    hak: { setuju: P.bolehSetuju, divisi: P.divisiBoleh, master: P.bolehMaster, batal: P.bolehBatal },
+    hak: {
+      setuju: P.bolehSetuju, divisi: P.divisiBoleh, master: P.bolehMaster, batal: P.bolehBatal,
+      // admin penuh — dipakai alat yang menyentuh data semua divisi sekaligus
+      admin: P.bolehMonitorSemua,
+    },
   };
 
   if (nama === 'master') {
