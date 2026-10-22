@@ -588,6 +588,9 @@ export function gambar() {
       setuju: P.bolehSetuju, divisi: P.divisiBoleh, master: P.bolehMaster, batal: P.bolehBatal,
       // admin penuh — dipakai alat yang menyentuh data semua divisi sekaligus
       admin: P.bolehMonitorSemua,
+      // "Kelola blok & lahan" = admin blok untuk SELURUH kebun, bukan hanya
+      // divisinya sendiri; master Blok karena itu tidak disaring divisi.
+      kelolaBlok: () => P.bolehMasterTabel('blocks'),
     },
   };
 

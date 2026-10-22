@@ -457,7 +457,14 @@ export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus, hak }) {
 
   const tempatTabel = el('div');
 
-  const divisiBoleh = () => (hak?.divisi ? hak.divisi() : null);
+  // Pemegang hak "Kelola blok & lahan" itu ADMIN BLOK untuk seluruh kebun —
+  // dia yang merawat master Blok, termasuk blok divisi lain. Kalau daftarnya
+  // ikut disaring divisi seperti master lain, dia cuma melihat blok divisinya
+  // sendiri dan haknya jadi tidak ada gunanya (mis. pengguna GIS yang hanya
+  // kebagian Keamanan & GIS cuma melihat 5 blok dari 150).
+  // Penyaringan divisi tetap berlaku untuk master lain.
+  const kelolaBlokPenuh = () => namaTabel === 'blocks' && !!hak?.kelolaBlok?.();
+  const divisiBoleh = () => (kelolaBlokPenuh() ? null : (hak?.divisi ? hak.divisi() : null));
   const gambarTabel = () => {
     const semuaBaris = D.baris(namaTabel);
     let data = saringMaster(namaTabel, semuaBaris, divisiBoleh());
