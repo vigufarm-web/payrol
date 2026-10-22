@@ -138,7 +138,11 @@ function panelKosong(pesanTeks) {
 
 // Isian terakhir diingat selama sesi, supaya input berikutnya tinggal pilih
 // pekerja saja - divisi/blok/kegiatan biasanya sama sepanjang hari.
+// BLOK sengaja TIDAK ikut diingat: tiap baris harus sadar bloknya sendiri.
+// Dulu blok pertama tetap tercentang untuk input berikutnya, jadi pekerja
+// orang kedua gampang nempel ke blok orang pertama tanpa disadari.
 const terakhir = { division_id: '', block_id: '', activity_id: '', job_type_id: '' };
+const LUPAKAN_BLOK = true;
 
 /** Komponen upah untuk lembur/premi manual (tarifnya diisi per baris). */
 function komponenManual(kategori) {
@@ -278,9 +282,9 @@ function formHK(barisAda, tgl, saatSelesai) {
   const centangBlok = new Map();
   const nilaiBaris = new Map();   // blockId -> { hk, activity_id, job_type_id } yang pernah diisi
   const barisInput = new Map();   // blockId -> elemen input yang sedang tampil
-  const daftarBlok = barisAda ? null : el('div.daftar-blok-hk', {
-    style: 'max-height:9rem;overflow:auto;border:1px solid var(--garis);padding:.4rem',
-  });
+  // tinggi & tata letaknya diatur di style.css (.daftar-blok-hk) supaya di
+  // layar lebar bloknya tersusun beberapa kolom dan tidak perlu digulir terus
+  const daftarBlok = barisAda ? null : el('div.daftar-blok-hk', {});
   const cariBlok = barisAda ? null : el('input', {
     type: 'search', placeholder: 'Saring blok…',
     oninput: (ev) => {
@@ -702,7 +706,7 @@ function formHK(barisAda, tgl, saatSelesai) {
       }
       Object.assign(terakhir, {
         division_id: Number(inDivisi.value),
-        block_id: Number(rencana[0].block_id),
+        block_id: LUPAKAN_BLOK ? '' : Number(rencana[0].block_id),
         activity_id: Number(rencana[0].activity_id),
         job_type_id: Number(rencana[0].job_type_id),
       });
@@ -923,9 +927,7 @@ function formMassal(tgl, saatSelesai) {
 
   // ---------------- daftar blok (boleh lebih dari satu) ----------------
   const centangBlok = new Map();
-  const daftarBlok = el('div', {
-    style: 'max-height:11rem;overflow:auto;border:1px solid var(--garis);padding:.4rem',
-  });
+  const daftarBlok = el('div.daftar-blok-hk', {});
   const ringkasBlok = el('p.bantuan.ringkas-blok', { teks: 'Belum ada blok dipilih' });
 
   const isiBlok = () => {
@@ -1173,7 +1175,7 @@ function formMassal(tgl, saatSelesai) {
     }
     Object.assign(terakhir, {
       division_id: Number(inDivisi.value),
-      block_id: Number(blok[0]),
+      block_id: LUPAKAN_BLOK ? '' : Number(blok[0]),
       activity_id: Number(inKegiatan.value),
       job_type_id: Number(inJenis.value),
     });
