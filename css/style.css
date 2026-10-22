@@ -255,11 +255,49 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .latar-panel { justify-content: flex-end; }
 .latar-dialog { align-items: center; justify-content: center; padding: 1rem; }
 
+/* Panel input dibuat lebar: di layar lebar isiannya berdampingan dua kolom,
+   jadi tanggal/pekerja/divisi/blok/kegiatan kelihatan sekaligus tanpa
+   digulir naik-turun. Di layar sempit tetap satu kolom penuh. */
 .panel {
-  background: var(--kertas); width: min(34rem, 100%);
+  background: var(--kertas); width: min(60rem, 100%);
   display: flex; flex-direction: column; height: 100%;
   border-radius: var(--radius-besar) 0 0 var(--radius-besar);
   box-shadow: var(--bayang-2);
+}
+
+/* Daftar centang blok: tinggi & kolomnya diatur di sini (dulu ditulis
+   sebagai gaya langsung di JS, jadi tidak bisa menyesuaikan lebar layar). */
+.daftar-blok-hk {
+  max-height: 9rem; overflow: auto;
+  border: 1px solid var(--garis); padding: 0.4rem;
+  border-radius: var(--radius);
+}
+@media (min-width: 62rem) {
+  /* panel sudah lebar — isian berpasangan dua kolom */
+  .panel-isi {
+    display: grid; align-content: start;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 1rem;
+  }
+  /* Isi form dibungkus satu div polos; dibuat "tembus pandang" supaya
+     isian di dalamnya jadi anak langsung grid dan bisa berpasangan. */
+  .panel-isi > div:only-child { display: contents; }
+  /* bawaannya melebar penuh; hanya isian berlabel yang berbagi kolom,
+     supaya tabel, hitungan, peringatan, dan daftar blok tidak terpotong */
+  .panel-isi > *, .panel-isi > div:only-child > * { grid-column: 1 / -1; }
+  .panel-isi > .isian, .panel-isi > div:only-child > .isian { grid-column: span 1; }
+  .panel-isi .isian textarea { min-height: 3.5rem; }
+  /* min-height supaya kotaknya tidak pernah menciut jadi sejalur tipis
+     waktu bloknya sedikit atau belum selesai digambar */
+  .daftar-blok-hk {
+    min-height: 9rem; max-height: 15rem;
+    columns: 3; column-gap: 1rem;
+  }
+  .daftar-blok-hk > label { break-inside: avoid; }
+}
+@media (min-width: 48rem) and (max-width: 61.99rem) {
+  .daftar-blok-hk { min-height: 8rem; max-height: 13rem; columns: 2; column-gap: 1rem; }
+  .daftar-blok-hk > label { break-inside: avoid; }
 }
 .panel-kepala, .panel-kaki {
   padding: 0.8rem 1rem; display: flex; gap: 0.6rem; align-items: center;
