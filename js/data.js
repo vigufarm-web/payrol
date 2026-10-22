@@ -32,7 +32,34 @@ export const setNamaPengisi = (n) => localStorage.setItem(KUNCI_NAMA, (n || '').
 export const setPath = (p) => { state.path = p; localStorage.setItem(KUNCI_PATH, p); };
 
 /** Modul bagian aktif mendaftarkan skemanya supaya labelRef() tahu nama baris. */
-export const pakaiSkema = (TABEL) => { state.labelTabel = TABEL || {}; };
+export const pakaiSkema = (TABEL, REF) => {
+  state.labelTabel = TABEL || {};
+  state.refTabel = REF || {};
+};
+
+/**
+ * Baris master ini masih dipakai transaksi mana saja?
+ *
+ * Dipakai dua tempat: layar master (supaya tombol Hapus menolak lebih dulu
+ * dengan keterangan) dan penjaga di hapus() di bawah (supaya jalur lain
+ * tidak bisa melewatinya). Dulu penjaganya hanya ada di layar — menghapus
+ * blok lewat jalur lain bisa membuat 1.185 baris transaksi kehilangan
+ * bloknya dan tertulis "#130 (tidak ada)" di laporan.
+ */
+export function pemakaiMaster(tabelInduk, id) {
+  const pemakai = [];
+  const semua = { ...state.labelTabel, ...state.refTabel };
+  for (const [nama, def] of Object.entries(semua)) {
+    if (nama === tabelInduk) continue;
+    for (const f of def?.f || []) {
+      if (f.t === 'ref' && f.ref === tabelInduk) {
+        const n = baris(nama).filter((r) => !r.deleted_at && Number(r[f.k]) === Number(id)).length;
+        if (n) pemakai.push({ tabel: def.judul || nama, n });
+      }
+    }
+  }
+  return pemakai;
+}
 
 const KOSONG = [];
 export function baris(tabel) {
@@ -800,6 +827,17 @@ export function hapus(tabel, id, { lunak = false, aksi = 'hapus' } = {}) {
   const i = daftar.findIndex((r) => Number(r.id) === Number(id));
   if (i < 0) throw new Error('Baris tidak ditemukan.');
   periksaTulis(aksi, tabel, daftar[i]);
+  // Baris master yang masih dipakai transaksi TIDAK boleh dibuang — kalau
+  // dibuang, transaksinya tetap ada tapi kehilangan acuannya dan tertulis
+  // "(tidak ada)" di laporan. Dijaga di sini, bukan hanya di layar, supaya
+  // jalur mana pun kena. Hapus lunak (tabel transaksi) tidak terpengaruh.
+  if (!lunak) {
+    const pemakai = pemakaiMaster(tabel, id);
+    if (pemakai.length) {
+      throw new Error(`Masih dipakai ${pemakai.map((x) => `${x.tabel}: ${x.n} baris`).join(', ')}`
+        + ' — ubah statusnya jadi "Tidak Aktif" saja, jangan dihapus.');
+    }
+  }
   if (lunak) {
     daftar[i].deleted_at = sekarang();
     daftar[i].deleted_by = namaPengisi() || 'Web';
