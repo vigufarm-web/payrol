@@ -226,7 +226,10 @@ export function isian(label, kendali, { bantuan = null, lebar = null } = {}) {
 
 export function pilihan(opsi, nilai, { kosongLabel = '— pilih —', saatUbah = null } = {}) {
   const s = el('select', saatUbah ? { onchange: saatUbah } : {});
-  s.append(el('option', { value: '', teks: kosongLabel }));
+  // kosongLabel null/'' berarti pilihan ini WAJIB — tidak ada baris kosong.
+  // Dulu baris kosongnya tetap dibuat dan tertulis "null", jadi pemanggilnya
+  // harus membuangnya sendiri sesudahnya.
+  if (kosongLabel) s.append(el('option', { value: '', teks: kosongLabel }));
   for (const o of opsi) {
     const op = el('option', { value: o.nilai, teks: o.label });
     if (String(o.nilai) === String(nilai)) op.selected = true;

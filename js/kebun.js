@@ -501,8 +501,7 @@ export function halamanLaporanKebun({ periode, gambar, hak }) {
     kosongLabel: null,
     saatUbah: (e) => { pilihanLaporan.jenis = e.target.value; gambarIsi(); },
   });
-  // buang pilihan kosong pada pemilih periode
-  pilihJenis.querySelector('option[value=""]')?.remove();
+
 
   wadah.append(
     el('div.lembar', { style: 'margin-bottom:1.4rem' }, [

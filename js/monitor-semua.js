@@ -14,7 +14,9 @@
 import * as D from './data.js';
 import {
   el, tabel, kosongkan, taruh, rupiah, angka, hk as fhk, pesan, waktu,
+  pilihParuh, periodeParuh, tanya, isian, pilihan, namaBulan,
 } from './ui.js';
+import { unduhXlsx, S } from './xlsx-tulis.js';
 
 const nol = (v) => Number(v) || 0;
 const hmPakai = (r) => Math.max(0, nol(r.hm_akhir) - nol(r.hm_awal));
@@ -180,11 +182,301 @@ function hitungAlat(data, dari, sampai) {
     || String(a.unit).localeCompare(String(b.unit), 'id'));
 }
 
+// --------------------------------------------------- unduh data mentah
+//
+// Ringkasan di layar hanya angka jadi. Untuk diperiksa sendiri di Excel,
+// admin perlu barisnya satu per satu. Dua lembar mentah di bawah ini
+// memakai aturan acc yang SAMA dengan ringkasannya, lalu menuliskan
+// statusnya di kolom tersendiri supaya terlihat mana yang belum di-acc.
+
+const ACC_LABEL = (data, tabelNama, id) => (
+  menungguDi(data, tabelNama, id) ? 'Menunggu acc'
+    : (accDi(data, tabelNama, id) ? 'Sudah acc' : 'Ditolak')
+);
+
+/** Status satu baris untuk kolom "Status" di unduhan. Baris yang sudah
+ *  dihapus IKUT diunduh — admin yang mengaudit perlu tahu apa yang dibuang,
+ *  siapa yang membuang, dan kapan — tapi ditandai jelas dan tidak ikut total. */
+const STATUS_BARIS = (data, tabelNama, r) => (
+  r.deleted_at ? `Dihapus${r.deleted_by ? ` oleh ${r.deleted_by}` : ''}`
+    : ACC_LABEL(data, tabelNama, r.id)
+);
+const jejak = (r) => ({
+  nomor: r.nomor_transaksi || '',
+  dibuatOleh: r.created_by || '',
+  dibuat: r.created_at || '',
+  diubah: r.updated_at && r.updated_at !== r.created_at ? r.updated_at : '',
+});
+
+/** Baris mentah satu bagian Payroll HK. */
+function mentahPayroll(data, dari, sampai) {
+  const peta = (nm, kunci) => new Map(barisDi(data, nm).map((r) => [Number(r.id), r[kunci]]));
+  const div = peta('divisions', 'nama_divisi');
+  const blok = peta('blocks', 'nama_blok');
+  const keg = peta('activities', 'nama_kegiatan');
+  const jen = peta('job_types', 'nama_jenis');
+  const komp = peta('wage_components', 'nama_komponen');
+  const emp = new Map(barisDi(data, 'employees').map((r) => [Number(r.id), r]));
+  const nm = (m, id) => (id == null || id === '' ? '' : (m.get(Number(id)) || `#${id}`));
+  const keluar = [];
+  const tambah = (jenis, r, extra) => {
+    const e = emp.get(Number(r.employee_id));
+    keluar.push({
+      ...jejak(r),
+      tanggal: r.tanggal, jenis,
+      divisi: nm(div, r.division_id),
+      blok: nm(blok, r.block_id),
+      nik: e?.nik || '', pekerja: e?.nama || `#${r.employee_id}`,
+      hk: 0, qty: 0, satuan: '', tarif: 0, nominal: nol(r.nominal),
+      keterangan: r.keterangan_manual || r.catatan || '',
+      acc: 'Sudah acc',
+      ...extra,
+    });
+  };
+  for (const r of barisDi(data, 'daily_payroll')) {
+    if (r.tanggal < dari || r.tanggal > sampai) continue;
+    tambah('HK harian', r, { hk: nol(r.hk), tarif: nol(r.tarif_hk_snapshot),
+      kegiatan: nm(keg, r.activity_id), pekerjaan: nm(jen, r.job_type_id),
+      acc: STATUS_BARIS(data, 'daily_payroll', r) });
+  }
+  for (const r of barisDi(data, 'borongan_transactions')) {
+    if (r.tanggal < dari || r.tanggal > sampai) continue;
+    tambah('Borongan', r, { qty: nol(r.qty), satuan: r.satuan || '',
+      tarif: nol(r.tarif_snapshot), komponen: nm(komp, r.wage_component_id),
+      acc: STATUS_BARIS(data, 'borongan_transactions', r) });
+  }
+  for (const [nmTabel, label] of [['lembur_transactions', 'Lembur'], ['premi_transactions', 'Premi']]) {
+    for (const r of barisDi(data, nmTabel)) {
+      if (r.tanggal < dari || r.tanggal > sampai) continue;
+      tambah(label, r, { qty: nol(r.qty), satuan: r.satuan || '',
+        tarif: nol(r.tarif_snapshot), komponen: nm(komp, r.wage_component_id),
+        acc: STATUS_BARIS(data, nmTabel, r) });
+    }
+  }
+  return keluar.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal))
+    || String(a.divisi).localeCompare(String(b.divisi), 'id'));
+}
+
+/** Baris mentah satu bagian Alat Berat & Kendaraan. */
+function mentahAlat(data, dari, sampai) {
+  const unit = new Map(barisDi(data, 'units').map((u) => [Number(u.id), u]));
+  const op = new Map(barisDi(data, 'operators').map((o) => [Number(o.id), o]));
+  const namaUnit = (id) => { const u = unit.get(Number(id));
+    return u ? `${u.kode} — ${u.nama}` : `#${id}`; };
+  const keluar = [];
+  for (const r of barisDi(data, 'work_logs')) {
+    if (r.tanggal < dari || r.tanggal > sampai) continue;
+    const o = op.get(Number(r.operator_id));
+    keluar.push({
+      ...jejak(r),
+      tanggal: r.tanggal, jenis: 'Log kerja', unit: namaUnit(r.unit_id),
+      kategori: unit.get(Number(r.unit_id))?.kategori || '',
+      operator: o?.nama || '', hk: nol(r.hk),
+      hm: hmPakai(r), km: kmPakai(r), ritase: nol(r.ritase), liter: 0,
+      biaya: nol(r.hk) * nol(o?.tarif_harian) + hmPakai(r) * nol(o?.tarif_jam) + nol(r.premi),
+      keterangan: r.keterangan || r.catatan || '',
+      acc: STATUS_BARIS(data, 'work_logs', r),
+    });
+  }
+  for (const r of barisDi(data, 'fuel_logs')) {
+    if (r.tanggal < dari || r.tanggal > sampai) continue;
+    keluar.push({ ...jejak(r), tanggal: r.tanggal, jenis: 'Solar', unit: namaUnit(r.unit_id),
+      kategori: unit.get(Number(r.unit_id))?.kategori || '', operator: '',
+      hk: 0, hm: 0, km: 0, ritase: 0, liter: nol(r.liter),
+      biaya: nol(r.liter) * nol(r.harga_liter),
+      keterangan: r.keterangan || '', acc: STATUS_BARIS(data, 'fuel_logs', r) });
+  }
+  for (const r of barisDi(data, 'service_logs')) {
+    if (r.tanggal < dari || r.tanggal > sampai) continue;
+    keluar.push({ ...jejak(r), tanggal: r.tanggal, jenis: 'Servis', unit: namaUnit(r.unit_id),
+      kategori: unit.get(Number(r.unit_id))?.kategori || '', operator: '',
+      hk: 0, hm: 0, km: 0, ritase: 0, liter: 0, biaya: nol(r.biaya),
+      keterangan: r.uraian || r.keterangan || '',
+      acc: STATUS_BARIS(data, 'service_logs', r) });
+  }
+  return keluar.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal))
+    || String(a.unit).localeCompare(String(b.unit), 'id'));
+}
+
+/** Rentang tanggal dari pilihan di kotak unduhan. */
+function rentangUnduh(mode, bulan, tahun, periodeKini) {
+  if (mode === 'kini') return [...periodeKini.rentang(), periodeKini.judul()];
+  if (mode === 'semua') return ['0001-01-01', '9999-12-31', 'Semua data'];
+  if (mode === 'tahun') return [`${tahun}-01-01`, `${tahun}-12-31`, `Tahun ${tahun}`];
+  const b = String(bulan).padStart(2, '0');
+  const akhir = new Date(Date.UTC(Number(tahun), Number(bulan), 0)).getUTCDate();
+  return [`${tahun}-${b}-01`, `${tahun}-${b}-${akhir}`, `${namaBulan(Number(bulan))} ${tahun}`];
+}
+
 // ------------------------------------------------------------- halaman
-export function halamanMonitorSemua({ periode }) {
+export function halamanMonitorSemua({ periode: periodeBulan }) {
   const wadah = el('section');
   const tempat = el('div', {}, [el('p.samar', { teks: 'Mengambil data semua bagian…' })]);
-  wadah.append(tempat);
+  // paruh periode gajian (1–15 / 16–akhir / sebulan penuh), sama seperti
+  // Ringkasan dan Laporan Kebun
+  let periode = periodeParuh(periodeBulan);
+  taruh(wadah, pilihParuh(() => {
+    periode = periodeParuh(periodeBulan);
+    taruh(kosongkan(tempat), el('p.samar', { teks: 'Menghitung ulang…' }));
+    gambarIsi().catch((e) => pesan(`Gagal memuat ulang: ${e.message}`, 'galat', 6));
+  }), tempat);
+
+  /** Kotak pilihan periode lalu unduh .xlsx. Halaman ini admin saja, jadi
+   *  unduhannya pun otomatis hanya bisa dipakai admin. */
+  const unduhSemua = async () => {
+    const thnKini = Number(periodeBulan.tahun) || new Date().getFullYear();
+    const tahunAda = [];
+    for (let t = thnKini + 1; t >= thnKini - 6; t--) tahunAda.push({ nilai: t, label: String(t) });
+    const inMode = pilihan([
+      { nilai: 'kini', label: `Periode yang sedang dilihat — ${periode.judul()}` },
+      { nilai: 'bulan', label: 'Satu bulan tertentu' },
+      { nilai: 'tahun', label: 'Satu tahun penuh' },
+      { nilai: 'semua', label: 'SEMUA data (sejak awal)' },
+    ], 'kini', { kosongLabel: null });
+    const inBulan = pilihan(
+      Array.from({ length: 12 }, (_, i) => ({ nilai: i + 1, label: namaBulan(i + 1) })),
+      Number(periodeBulan.bulan) || 1, { kosongLabel: null });
+    const inTahun = pilihan(tahunAda, thnKini, { kosongLabel: null });
+    const barisBulan = isian('Bulan', inBulan);
+    const barisTahun = isian('Tahun', inTahun);
+    const sesuaikan = () => {
+      barisBulan.style.display = inMode.value === 'bulan' ? '' : 'none';
+      barisTahun.style.display = (inMode.value === 'bulan' || inMode.value === 'tahun') ? '' : 'none';
+    };
+    inMode.addEventListener('change', sesuaikan);
+    sesuaikan();
+
+    const setuju = await tanya('Unduh data ke Excel', el('div', {}, [
+      el('p', { teks: 'Berisi ringkasan per divisi DAN semua barisnya satu per satu — '
+        + 'payroll operasional dan alat berat & kendaraan, masing-masing di lembar sendiri.' }),
+      isian('Periode', inMode),
+      barisBulan,
+      barisTahun,
+      el('p.bantuan', { teks: 'Semua baris ikut terunduh — termasuk yang belum di-acc dan yang '
+        + 'SUDAH DIHAPUS — masing-masing ditandai di kolom "Status". Ikut juga nomor transaksi, '
+        + 'siapa yang menginput, dan kapan. Baris TOTAL hanya menjumlah yang sudah acc.' }),
+    ]), { ya: 'Unduh', tidak: 'Batal' });
+    if (!setuju) return;
+
+    const [dari, sampai, judulPeriode] = rentangUnduh(
+      inMode.value, inBulan.value, inTahun.value, periode);
+    pesan('Menyiapkan berkas Excel…', 'info', 4);
+    try {
+      let bagian = [];
+      ({ bagian } = await bacaSemuaBagian());
+      const lembar = [];
+      const ringkas = [];
+      const mentahOp = [];
+      const mentahAl = [];
+      for (const b of bagian) {
+        if (b.aplikasi === 'AlatBerat') {
+          mentahAl.push(...mentahAlat(b.data, dari, sampai));
+        } else {
+          ringkas.push(...hitungPayroll(b.data, dari, sampai));
+          mentahOp.push(...mentahPayroll(b.data, dari, sampai));
+        }
+      }
+      const unitRingkas = [];
+      for (const b of bagian) {
+        if (b.aplikasi === 'AlatBerat') unitRingkas.push(...hitungAlat(b.data, dari, sampai));
+      }
+
+      const kepala = (judul, kolom) => [
+        [S.judul(`PT VIGU FARM INDONESIA — ${judul}`)],
+        [S.kecil(`Periode: ${judulPeriode}  (${dari} s/d ${sampai})`)],
+        [S.kecil(`Dibuat: ${new Date().toLocaleString('id-ID')} oleh ${D.namaPengisi() || 'admin'}`)],
+        [],
+        kolom.map((k) => S.kepala(k)),
+      ];
+
+      // --- lembar 1: ringkasan per divisi
+      lembar.push({
+        nama: 'Ringkasan',
+        lebar: [26, 14, 12, 10, 16, 14, 14, 16, 14],
+        baris: [
+          ...kepala('Ringkasan Semua Divisi',
+            ['Divisi', 'Jenis', 'Orang/unit', 'HK', 'Upah pokok', 'Lembur', 'Premi', 'Total', 'Menunggu acc']),
+          ...ringkas.map((r) => [S.teks(r.divisi), S.teks(r.jenis), S.angka(r.orang),
+            S.angka(r.hk), S.uang(r.pokok), S.uang(r.lembur), S.uang(r.premi),
+            S.uang(r.total), S.angka(r.tunggu)]),
+          [S.teksT('TOTAL'), S.teksT(''), S.angkaT(ringkas.reduce((n, r) => n + nol(r.orang), 0)),
+            S.angkaT(ringkas.reduce((n, r) => n + nol(r.hk), 0)),
+            S.uangT(ringkas.reduce((n, r) => n + nol(r.pokok), 0)),
+            S.uangT(ringkas.reduce((n, r) => n + nol(r.lembur), 0)),
+            S.uangT(ringkas.reduce((n, r) => n + nol(r.premi), 0)),
+            S.uangT(ringkas.reduce((n, r) => n + nol(r.total), 0)),
+            S.angkaT(ringkas.reduce((n, r) => n + nol(r.tunggu), 0))],
+        ],
+      });
+
+      // --- lembar 2: semua baris payroll operasional
+      const KOLOM_OP = ['Tanggal', 'Jenis', 'Divisi', 'Blok', 'NIK', 'Pekerja', 'Kegiatan',
+        'Jenis pekerjaan', 'HK', 'Jumlah', 'Satuan', 'Tarif', 'Nilai (Rp)', 'Keterangan',
+        'Status', 'Nomor transaksi', 'Diinput oleh', 'Waktu input', 'Terakhir diubah'];
+      lembar.push({
+        nama: 'Operasional',
+        lebar: [12, 13, 20, 18, 12, 24, 20, 20, 9, 10, 10, 14, 14, 24, 20, 22, 16, 18, 18],
+        baris: [
+          ...kepala('Payroll Operasional — semua baris', KOLOM_OP),
+          ...mentahOp.map((r) => [S.tanggal(r.tanggal), S.teks(r.jenis), S.teks(r.divisi),
+            S.teks(r.blok), S.teks(r.nik), S.teks(r.pekerja),
+            S.teks(r.kegiatan || r.komponen || ''), S.teks(r.pekerjaan || ''),
+            S.angka(r.hk), S.angka(r.qty), S.teks(r.satuan), S.uang(r.tarif),
+            S.uang(r.nominal), S.teks(r.keterangan), S.teks(r.acc),
+            S.teks(r.nomor), S.teks(r.dibuatOleh), S.teks(r.dibuat), S.teks(r.diubah)]),
+          [S.teksT(`${mentahOp.length} baris`), ...Array(11).fill(S.teksT('')),
+            S.uangT(mentahOp.filter((r) => r.acc === 'Sudah acc')
+              .reduce((n, r) => n + nol(r.nominal), 0)),
+            S.teksT('(hanya yang sudah acc)'), ...Array(5).fill(S.teksT(''))],
+        ],
+      });
+
+      // --- lembar 3: alat berat & kendaraan
+      const KOLOM_AL = ['Tanggal', 'Jenis', 'Unit', 'Kategori', 'Operator', 'HK', 'HM', 'KM',
+        'Ritase', 'Liter', 'Biaya (Rp)', 'Keterangan', 'Status', 'Nomor transaksi',
+        'Diinput oleh', 'Waktu input', 'Terakhir diubah'];
+      lembar.push({
+        nama: 'Alat Berat',
+        lebar: [12, 12, 26, 16, 18, 9, 10, 10, 9, 10, 16, 24, 20, 22, 16, 18, 18],
+        baris: [
+          ...kepala('Alat Berat & Kendaraan — semua baris', KOLOM_AL),
+          ...mentahAl.map((r) => [S.tanggal(r.tanggal), S.teks(r.jenis), S.teks(r.unit),
+            S.teks(r.kategori), S.teks(r.operator), S.angka(r.hk), S.angka(r.hm),
+            S.angka(r.km), S.angka(r.ritase), S.angka(r.liter), S.uang(r.biaya),
+            S.teks(r.keterangan), S.teks(r.acc),
+            S.teks(r.nomor), S.teks(r.dibuatOleh), S.teks(r.dibuat), S.teks(r.diubah)]),
+          [S.teksT(`${mentahAl.length} baris`), ...Array(9).fill(S.teksT('')),
+            S.uangT(mentahAl.filter((r) => r.acc === 'Sudah acc')
+              .reduce((n, r) => n + nol(r.biaya), 0)),
+            S.teksT('(hanya yang sudah acc)'), ...Array(5).fill(S.teksT(''))],
+        ],
+      });
+
+      // --- lembar 4: ringkasan per unit
+      if (unitRingkas.length) {
+        lembar.push({
+          nama: 'Per Unit',
+          lebar: [26, 16, 12, 10, 10, 10, 10, 12, 14, 14, 14, 16],
+          baris: [
+            ...kepala('Alat Berat & Kendaraan — per unit',
+              ['Unit', 'Kategori', 'Hari operasi', 'HK operator', 'HM', 'KM', 'Ritase',
+                'Liter', 'Upah', 'Premi', 'Solar', 'Servis']),
+            ...unitRingkas.map((r) => [S.teks(r.unit), S.teks(r.kategori),
+              S.angka(r.hari_operasi), S.angka(r.hkOp), S.angka(r.hm), S.angka(r.km),
+              S.angka(r.ritase), S.angka(r.liter), S.uang(r.upah), S.uang(r.premi),
+              S.uang(r.solar), S.uang(r.servis)]),
+          ],
+        });
+      }
+
+      const berkas = `Monitoring_${judulPeriode.replace(/[^\w]+/g, '_')}.xlsx`;
+      await unduhXlsx(berkas, lembar);
+      pesan(`${berkas} diunduh — ${mentahOp.length} baris operasional, `
+        + `${mentahAl.length} baris alat berat.`, 'sukses', 8);
+    } catch (e) {
+      pesan(`Gagal menyiapkan Excel: ${e.message}`, 'galat', 10);
+    }
+  };
 
   const kotak = (l, v, s = '') => el('div', {}, [
     el('dt', { teks: l }),
@@ -273,6 +565,11 @@ export function halamanMonitorSemua({ periode }) {
               taruh(kosongkan(tempat), el('p.samar', { teks: 'Mengambil data terbaru…' }));
               gambarIsi().catch((e) => pesan(`Gagal memuat ulang: ${e.message}`, 'galat', 6));
             },
+          }),
+          el('button.tombol-samar.tombol-kecil', {
+            type: 'button', teks: 'Unduh Excel',
+            title: 'Semua baris operasional & alat berat — bisa pilih periode, tahun, atau semua data',
+            onclick: () => { unduhSemua(); },
           }),
           el('button.tombol-samar.tombol-kecil', {
             type: 'button', teks: 'Cetak', onclick: () => window.print(),
