@@ -14,7 +14,7 @@ import {
 } from './ui.js';
 import {
   mintaPin, periksaPinAdmin, adminPinTerpasang, rentangPeriode,
-  rekomendasiAnggaran, kotakRekomendasi,
+  rekomendasiAnggaran, kotakRekomendasi, jedaInput,
 } from './kebun.js';
 
 const opsiUnit = (idSekarang = null) => {
@@ -1053,8 +1053,36 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
     const target = targetKini();
     const persen = target ? Math.round((total / target) * 1000) / 10 : null;
 
+    // Tanggal kegiatan TERAKHIR yang sudah di-acc — supaya kepala divisi tahu
+    // angka di atas sudah sampai tanggal berapa (hari ini tgl 14 tapi input
+    // terakhir tgl 12 berarti dua hari belum masuk).
+    const tglTerakhir = [...log, ...D.baris('fuel_logs').filter(dalam),
+      ...D.baris('service_logs').filter(dalam)]
+      .map((x) => x.tanggal).sort().at(-1) || null;
+    const j = jedaInput(tglTerakhir);
+    const telat = j.tertinggal != null && j.tertinggal >= 2;
+    const kotak = (l, v, sat = '') => el('div', {}, [
+      el('dt', { teks: l }),
+      el('dd', {}, [v, sat ? el('span.satuan', { teks: ' ' + sat }) : null]),
+    ]);
+
     kosongkan(tempatBiaya).append(el('div.lembar', {}, [
       el('div.lembar-kepala', {}, [el('h2', { teks: `Biaya alat berat & kendaraan — ${r.label}` })]),
+      el('dl.angka-utama', {}, [
+        kotak('Total HK operator', fhk(totalHkOp), 'HK'),
+        kotak('Total biaya', rupiah(total), 'Rp'),
+        kotak('Unit beroperasi', angka(new Set(log.map((x) => Number(x.unit_id))).size), 'unit'),
+        kotak('Hari ada kegiatan', angka(new Set(log.map((x) => x.tanggal)).size), 'hari'),
+        el('div', { title: telat
+          ? `Belum ada input ${j.tertinggal} hari terakhir — angka di atas mungkin belum lengkap.`
+          : null }, [
+          el('dt', { teks: 'Input terakhir' }),
+          el('dd', { style: telat ? 'color:var(--merah)' : null }, [
+            j.teks === 'Belum ada' ? 'Belum ada' : ftanggal(j.teks),
+            el('span.satuan', { teks: ' ' + j.satuan }),
+          ]),
+        ]),
+      ]),
       el('div.lembar-isi', {}, [
         tabel([
           { l: 'Jenis biaya', k: 'jenis' },

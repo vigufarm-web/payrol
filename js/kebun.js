@@ -129,6 +129,25 @@ export function biayaKebun(divisionId, dari, sampai) {
     get total() { return this.upahHk + this.upahBorongan + this.upahLembur + this.upahPremi; },
     pekerja: new Set([...hk, ...borongan, ...lembur, ...premi].map((r) => r.employee_id)),
     hari: new Set(hk.map((r) => r.tanggal)),
+    // Tanggal kegiatan TERAKHIR yang sudah tercatat. Penting buat kepala
+    // divisi: hari ini tanggal 14 tapi input terakhir tanggal 12 berarti
+    // ada dua hari yang belum masuk — angkanya belum lengkap.
+    inputTerakhir: [...hk, ...borongan, ...lembur, ...premi]
+      .map((r) => r.tanggal).sort().at(-1) || null,
+  };
+}
+
+/** "Input terakhir" + berapa hari tertinggal dari hari ini. */
+export function jedaInput(tanggalTerakhir) {
+  if (!tanggalTerakhir) return { teks: 'Belum ada', satuan: '', tertinggal: null };
+  const hariIniIso = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
+    .toISOString().slice(0, 10);
+  const selisih = Math.round(
+    (Date.parse(`${hariIniIso}T00:00:00Z`) - Date.parse(`${tanggalTerakhir}T00:00:00Z`)) / 86400000);
+  return {
+    teks: tanggalTerakhir,
+    tertinggal: selisih,
+    satuan: selisih <= 0 ? 'hari ini' : selisih === 1 ? '1 hari lalu' : `${selisih} hari lalu`,
   };
 }
 
@@ -342,6 +361,21 @@ export function halamanLaporanKebun({ periode, gambar, hak }) {
       el('dt', { teks: l }),
       el('dd', {}, [v, s ? el('span.satuan', { teks: ' ' + s }) : null]),
     ]);
+    // Kartu "Input terakhir": kalau tertinggal 2 hari atau lebih, ditandai
+    // supaya kepala divisi tidak mengira angkanya sudah lengkap.
+    const kotakInput = (tgl) => {
+      const j = jedaInput(tgl);
+      const telat = j.tertinggal != null && j.tertinggal >= 2;
+      return el('div', { title: telat
+        ? `Belum ada input ${j.tertinggal} hari terakhir — angka di atas mungkin belum lengkap.`
+        : null }, [
+        el('dt', { teks: 'Input terakhir' }),
+        el('dd', { style: telat ? 'color:var(--merah)' : null }, [
+          j.teks === 'Belum ada' ? 'Belum ada' : ftanggal(j.teks),
+          el('span.satuan', { teks: ' ' + j.satuan }),
+        ]),
+      ]);
+    };
 
     taruh(kosongkan(tempat),
       el('div.lembar', {}, [
@@ -355,6 +389,7 @@ export function halamanLaporanKebun({ periode, gambar, hak }) {
           kotak('Total biaya', rupiah(b.total), 'Rp'),
           kotak('Pekerja', angka(b.pekerja.size), 'orang'),
           kotak('Hari ada kegiatan', angka(b.hari.size), 'hari'),
+          kotakInput(b.inputTerakhir),
         ]),
       ]),
 
