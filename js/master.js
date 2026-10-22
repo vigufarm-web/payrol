@@ -3,6 +3,7 @@
 // sedang dibuka, jadi satu kode ini melayani semua tabel master.
 
 import * as D from './data.js';
+import { mst, siklusBlok, dasarNamaBlok, SIKLUS } from './siklus.js';
 import {
   el, tabel, isian, pilihan, kesalahan, panel, tanya, pesan, kosongkan, taruh, angka,
 } from './ui.js';
@@ -152,6 +153,70 @@ function periksa(namaTabel, isi, idSekarang) {
 }
 
 /**
+ * Blok ini kebun pisang yang ditanam? Siklus R0/R1/R2/R3 hanya untuk
+ * komoditas pisang — padi dan divisi lain tetap seperti semula.
+ *
+ * Di daftar blok bercampur dua macam isi: BLOK TANAM (A01, A02, …) dan
+ * TEMPAT (Barak, Packing, Nursery, All Area). Tempat tidak punya tanggal
+ * tanam, jadi tidak pernah dapat siklus — isian tanggalnya boleh muncul,
+ * tapi dibiarkan kosong saja.
+ *
+ * Patokannya komoditas blok itu sendiri. Kalau komoditasnya belum diisi
+ * (data lama), dipakai nama divisinya sebagai cadangan.
+ */
+function blokPisang(divisionId, komoditas) {
+  const kom = String(komoditas || '').trim();
+  if (kom) return /pisang/i.test(kom);
+  const d = D.cari('divisions', divisionId);
+  return /pisang/i.test(String(d?.nama_divisi || ''));
+}
+
+/**
+ * Isian "Tanggal tanam" untuk master Blok (khusus kebun pisang).
+ *
+ * Bukan kolom database — disimpan di bagian `web` (lihat tanamBlok di
+ * data.js). Dari tanggal ini situs menghitung sendiri umur tanaman (MST)
+ * dan siklusnya, lalu nama blok yang TAMPIL ikut menyesuaikan.
+ */
+function isianTanamBlok(baris, ambilDivisi, ambilKomoditas) {
+  const awal = baris ? D.tanamBlok(baris.id) : null;
+  const inTgl = el('input', { type: 'date', nilai: awal || '' });
+  const hasil = el('p.bantuan', { style: 'margin-top:.3rem' });
+  const bungkus = el('div');
+
+  const perbarui = () => {
+    const pisang = blokPisang(ambilDivisi(), ambilKomoditas());
+    bungkus.style.display = pisang || inTgl.value ? '' : 'none';
+    const m = mst(inTgl.value);
+    const sk = siklusBlok(inTgl.value);
+    const dasar = dasarNamaBlok(baris?.nama_blok || '');
+    hasil.textContent = !inTgl.value
+      ? 'Kosongkan untuk tempat seperti Barak, Packing, Nursery, atau All Area — '
+        + 'nama bloknya tetap apa adanya, tanpa siklus.'
+      : m == null ? 'Tanggal tanam belum lewat, umurnya belum bisa dihitung.'
+        : `Umur ${m} MST · siklus ${sk.label}`
+          + (dasar ? ` · nama blok tampil sebagai "${dasar} (${sk.kode === 'R0' ? 'Indukan' : sk.kode})"` : '');
+  };
+  inTgl.addEventListener('input', perbarui);
+  perbarui();
+
+  taruh(bungkus, isian('Tanggal tanam', inTgl, {
+    bantuan: 'Dipakai menghitung umur (MST) dan siklus: '
+      + SIKLUS.map((x) => `${x.label} minggu ${x.dari}–${x.sampai}`).join(', ')
+      + '. Lewat minggu 169 ditandai "lewat R3".',
+  }), hasil);
+
+  return {
+    elemen: bungkus,
+    perbarui,
+    simpan(blockId) { D.setTanamBlok(blockId, inTgl.value || null); },
+    // kalau tanggal tanam diisi, akhiran siklus yang dulu diketik manual
+    // dibuang dari nama supaya tidak tertulis dua kali
+    namaDasar(nama) { return inTgl.value ? dasarNamaBlok(nama) : nama; },
+  };
+}
+
+/**
  * Isian "Divisi" untuk master Karyawan.
  *
  * Bukan kolom database — penetapannya disimpan di bagian `web` (lihat
@@ -222,6 +287,15 @@ function formPanel(namaTabel, baris, saatSelesai, divisiBoleh = null) {
   // Ditaruh TEPAT DI BAWAH NAMA, bukan di ujung form — ini isian penting,
   // jangan sampai tidak terlihat tanpa menggulung layar.
   const pilihDivisi = namaTabel === 'employees' ? isianDivisiKaryawan(baris, divisiBoleh) : null;
+  // Blok kebun pisang: tanggal tanam -> umur (MST) -> siklus -> nama tampil
+  const tanamBlok = namaTabel === 'blocks'
+    ? isianTanamBlok(baris, () => kendali.division_id?.value,
+      () => kendali.komoditas?.value) : null;
+  if (tanamBlok) {
+    kendali.division_id?.addEventListener('change', () => tanamBlok.perbarui());
+    kendali.komoditas?.addEventListener('input', () => tanamBlok.perbarui());
+    isiForm.append(tanamBlok.elemen);
+  }
   if (pilihDivisi) {
     const urutNama = def.f.findIndex((f) => f.k === 'nama');
     const sesudah = isiForm.children[urutNama >= 0 ? urutNama : 0];
@@ -254,9 +328,11 @@ function formPanel(namaTabel, baris, saatSelesai, divisiBoleh = null) {
       ]), { ya: 'Tetap simpan sebagai baru', tidak: 'Batal — pakai yang sudah ada' });
       if (!lanjut) return;
     }
+    if (tanamBlok) isi.nama_blok = tanamBlok.namaDasar(isi.nama_blok);
     const simpanan = baris ? (D.ubah(namaTabel, baris.id, isi), baris)
       : D.tambah(namaTabel, isi);
     if (pilihDivisi) pilihDivisi.simpan(simpanan.id);
+    if (tanamBlok) tanamBlok.simpan(simpanan.id);
     p.tutup();
     pesan(baris ? `${def.judul} diperbarui. Jangan lupa Simpan ke GitHub.`
       : `${def.judul} ditambahkan. Jangan lupa Simpan ke GitHub.`, 'sukses');
@@ -403,6 +479,15 @@ export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus, hak }) {
     // anggota divisi mana. Blok sudah punya kolom divisi sendiri.
     const pakaiDivisi = KOLOM_PAKAI[namaTabel] && namaTabel !== 'blocks';
     const jejakDivisi = pakaiDivisi ? petaDivisi(namaTabel) : null;
+    // Blok: kolom umur & siklus, dihitung dari tanggal tanam (terkunci —
+    // tidak bisa diketik, murni hasil hitungan)
+    const kolomSiklus = namaTabel === 'blocks' ? [
+      { l: 'Tanggal tanam', rata: 'angka',
+        nilai: (r) => D.tanamBlok(r.id) || '–' },
+      { l: 'Umur (MST)', rata: 'angka',
+        nilai: (r) => { const m = mst(D.tanamBlok(r.id)); return m == null ? '–' : `${m}`; } },
+      { l: 'Siklus', nilai: (r) => siklusBlok(D.tanamBlok(r.id))?.label || '–' },
+    ] : null;
     const tetapDivisi = namaTabel === 'employees' ? D.petaDivisiKaryawan() : null;
     const namaiDivisi = (daftar) => [...daftar].map((d) => D.labelRef('divisions', d))
       .sort((a, b) => String(a).localeCompare(String(b), 'id')).join(', ');
@@ -437,6 +522,7 @@ export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus, hak }) {
       }));
     // Divisi ditaruh setelah kolom nama, sebelum kolom-kolom rinci lainnya.
     if (kolomDivisi) kolom.splice(Math.min(2, kolom.length), 0, kolomDivisi);
+    if (kolomSiklus) kolom.push(...kolomSiklus);
 
     taruh(kosongkan(tempatTabel),
       el('p.samar', { style: 'margin:0 0 .5rem', teks: `${data.length} dari ${D.baris(namaTabel).length} ${def.tunggal}` }),

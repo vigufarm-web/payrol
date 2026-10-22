@@ -8,6 +8,8 @@
 // masuk lewat Excel tidak kalah rapi.
 
 import * as D from './data.js';
+import * as P from './pengguna.js';
+import { mst, siklusBlok, dasarNamaBlok, hariIniIso } from './siklus.js';
 import { bacaExcel, bisaBacaExcel } from './xlsx.js';
 import { JENIS_SERVIS, pakaiHm, pakaiKm } from './skema-alat.js';
 import { sebarHk, totalHkGrup } from './input-alat.js';
@@ -91,7 +93,8 @@ const tanpaSaran = (daftar) => (daftar.length ? ` Mungkin maksudnya: ${daftar.jo
 // =====================================================================
 // Definisi tiap jenis impor
 // =====================================================================
-const JENIS = {
+// diekspor supaya bisa diuji terpisah dari layarnya
+export const JENIS = {
   hk: {
     label: 'HK harian',
     aplikasi: 'PayrollHK',
@@ -497,6 +500,87 @@ const JENIS = {
     },
     masukkan(daftar) { for (const r of daftar) D.tambah('service_logs', r.isi); },
   },
+
+  // -------------------------------------------------------------- BLOK
+  // Master blok bisa diisi massal lewat Excel: 150 blok terlalu banyak
+  // kalau diketik satu-satu. Kode blok yang SUDAH ADA akan DIPERBARUI
+  // (luas, komoditas, tanggal tanam), bukan dibuat ganda.
+  blok: {
+    label: 'Blok (master)',
+    aplikasi: 'PayrollHK',
+    template: 'templates/Template_Blok.xlsx',
+    tabel: 'blocks',
+    kolom: ['Kode blok', 'Nama blok', 'Divisi', 'Luas (ha)', 'Komoditas',
+      'Tanggal tanam', 'Keterangan', 'Status'],
+    wajib: ['Kode blok', 'Divisi'],
+    ringkas: () => [
+      { l: 'Kode', nilai: (r) => r.isi.kode_blok },
+      { l: 'Nama', nilai: (r) => r.isi.nama_blok },
+      { l: 'Divisi', nilai: (r) => D.labelRef('divisions', r.isi.division_id) },
+      { l: 'Luas (ha)', nilai: (r) => r.isi.luas, jenis: 'angka', pecahan: 2, total: true },
+      { l: 'Tanggal tanam', nilai: (r) => r.tanam || '–' },
+      { l: 'Umur (MST)', nilai: (r) => (mst(r.tanam) ?? '–'), rata: 'angka' },
+      { l: 'Siklus', nilai: (r) => siklusBlok(r.tanam)?.label || '–' },
+      { l: 'Tindakan', nilai: (r) => (r.adaId ? 'perbarui' : 'baru') },
+    ],
+    periksa(baris) {
+      const salah = [];
+      const kode = rapi(baris['Kode blok']);
+      if (!kode) salah.push('Kode blok masih kosong.');
+      const divisi = cocokkan('divisions', baris.Divisi, (r) => r.nama_divisi);
+      if (rapi(baris.Divisi) && !divisi) {
+        salah.push(`Divisi "${rapi(baris.Divisi)}" tidak ada.`
+          + tanpaSaran(saran('divisions', baris.Divisi, (r) => r.nama_divisi)));
+      }
+      const luas = angkaDari(baris['Luas (ha)']);
+      if (rapi(baris['Luas (ha)']) && luas == null) {
+        salah.push(`Luas "${rapi(baris['Luas (ha)'])}" bukan angka.`);
+      } else if (luas != null && luas < 0) salah.push('Luas tidak boleh minus.');
+
+      let tanam = null;
+      if (rapi(baris['Tanggal tanam'])) {
+        tanam = tanggalDari(baris['Tanggal tanam']);
+        if (!tanam) {
+          salah.push(`Tanggal tanam "${rapi(baris['Tanggal tanam'])}" tidak dikenali. `
+            + 'Pakai bentuk 2026-10-20.');
+        } else if (tanam > hariIniIso()) {
+          salah.push(`Tanggal tanam ${ftanggal(tanam)} masih di masa depan.`);
+        }
+      }
+      const status = rapi(baris.Status);
+      if (status && !['Aktif', 'Tidak Aktif'].some((x) => samakan(x) === samakan(status))) {
+        salah.push(`Status "${status}" tidak dikenali. Pilihannya: Aktif, Tidak Aktif.`);
+      }
+      if (salah.length) return { salah };
+
+      // kode blok yang sudah ada -> diperbarui, bukan dibuat ganda
+      const ada = D.baris('blocks').find((r) => !r.deleted_at && samakan(r.kode_blok) === samakan(kode));
+      // nama dasar: akhiran siklus yang dulu diketik manual dibuang kalau
+      // tanggal tanamnya diisi, supaya tidak jadi "A01 (R1) (R2)"
+      const namaMentah = rapi(baris['Nama blok']) || ada?.nama_blok || kode;
+      return {
+        adaId: ada?.id || null,
+        tanam,
+        isi: {
+          kode_blok: kode,
+          nama_blok: tanam ? dasarNamaBlok(namaMentah) : namaMentah,
+          division_id: divisi.id,
+          luas: luas ?? (Number(ada?.luas) || 0),
+          komoditas: rapi(baris.Komoditas) || ada?.komoditas || '',
+          keterangan: rapi(baris.Keterangan) || ada?.keterangan || '',
+          status: status
+            ? (samakan(status) === samakan('Aktif') ? 'Aktif' : 'Tidak Aktif')
+            : (ada?.status || 'Aktif'),
+        },
+      };
+    },
+    masukkan(daftar) {
+      for (const r of daftar) {
+        const id = r.adaId ? (D.ubah('blocks', r.adaId, r.isi), r.adaId) : D.tambah('blocks', r.isi).id;
+        D.setTanamBlok(id, r.tanam);
+      }
+    },
+  },
 };
 
 // =====================================================================
@@ -631,7 +715,9 @@ function kotakJenis(kunci, { gambar, bisaEdit }) {
 export function halamanImpor(konteks) {
   const { bisaEdit } = konteks;
   const alat = D.state.aplikasi === 'AlatBerat';
-  const daftar = alat ? ['log', 'solar', 'servis'] : ['hk'];
+  // master Blok hanya untuk yang berhak mengelolanya
+  const daftar = alat ? ['log', 'solar', 'servis']
+    : (P.bolehMasterTabel('blocks') ? ['hk', 'blok'] : ['hk']);
 
   const wadah = el('section');
   if (!bisaBacaExcel()) {

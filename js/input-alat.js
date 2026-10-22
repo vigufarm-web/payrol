@@ -1047,11 +1047,17 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
     // Infrastruktur sengaja TIDAK ikut dihitung di sini — tempatnya di
     // Laporan Kebun, dengan targetnya sendiri. Kalau ikut dihitung di sini,
     // upah yang sama dinilai terhadap DUA target sekaligus.
-    const total = upahHkOp + upahJam + premiOp + biayaSolar + biayaServis;
+    // Target di halaman ini dipakai memantau TENAGA KERJA: upah HK operator,
+    // upah jam, dan premi. Solar & servis tetap ditampilkan sebagai biaya
+    // unit, tapi TIDAK diadu ke target itu — kalau ikut, angka targetnya
+    // jadi tidak nyambung dengan upah yang sebenarnya mau dipantau.
+    const upahTk = upahHkOp + upahJam + premiOp;
+    const biayaUnit = biayaSolar + biayaServis;
+    const total = upahTk + biayaUnit;      // dipakai di tabel rincian saja
     const totalHk = totalHkOp;
     const upahHkGabungan = upahHkOp;
     const target = targetKini();
-    const persen = target ? Math.round((total / target) * 1000) / 10 : null;
+    const persen = target ? Math.round((upahTk / target) * 1000) / 10 : null;
 
     // Tanggal kegiatan TERAKHIR yang sudah di-acc — supaya kepala divisi tahu
     // angka di atas sudah sampai tanggal berapa (hari ini tgl 14 tapi input
@@ -1070,7 +1076,8 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
       el('div.lembar-kepala', {}, [el('h2', { teks: `Biaya alat berat & kendaraan — ${r.label}` })]),
       el('dl.angka-utama', {}, [
         kotak('Total HK operator', fhk(totalHkOp), 'HK'),
-        kotak('Total biaya', rupiah(total), 'Rp'),
+        kotak('Upah tenaga kerja', rupiah(upahTk), 'Rp'),
+        kotak('Solar + servis', rupiah(biayaUnit), 'Rp'),
         kotak('Unit beroperasi', angka(new Set(log.map((x) => Number(x.unit_id))).size), 'unit'),
         kotak('Hari ada kegiatan', angka(new Set(log.map((x) => x.tanggal)).size), 'hari'),
         el('div', { title: telat
@@ -1100,16 +1107,21 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
             + 'dihitung di sini — itu ada di Laporan Kebun dengan targetnya sendiri, supaya '
             + 'upah yang sama tidak dinilai terhadap dua target sekaligus.',
         }),
+        el('h3', { style: 'margin:1.1rem 0 .3rem;font-size:1rem',
+          teks: 'Tenaga kerja terhadap target' }),
         target == null
           ? el('p.bantuan', { teks: 'Target periode ini belum diisi — klik "Atur target" '
             + 'untuk mengisi manual, mis. 15.000.000 per 2 minggu.' })
           : el('div', {}, [
-            el('div.meter', {}, [el('div.meter-isi' + (total > target ? '.lewat' : ''), {
+            el('div.meter', {}, [el('div.meter-isi' + (upahTk > target ? '.lewat' : ''), {
               style: `width:${Math.min(100, persen)}%`,
             })]),
-            el('p', { teks: `Terpakai ${rupiahPenuh(total)} dari target ${rupiahPenuh(target)} (${angka(persen, 1)}%).` }),
+            el('p', { teks: `Upah tenaga kerja ${rupiahPenuh(upahTk)} dari target `
+              + `${rupiahPenuh(target)} (${angka(persen, 1)}%).` }),
+            el('p.bantuan', { teks: `Yang diadu ke target hanya upah operator, upah jam, dan `
+              + `premi. Solar & servis ${rupiahPenuh(biayaUnit)} tidak ikut dihitung di sini.` }),
             kotakRekomendasi(rekomendasiAnggaran(
-              { total, totalHk, upahHk: upahHkGabungan }, target, r.dari, r.sampai), target),
+              { total: upahTk, totalHk, upahHk: upahHkGabungan }, target, r.dari, r.sampai), target),
           ]),
       ]),
     ]));

@@ -147,7 +147,25 @@ export function web() {
   w.target ||= {};
   w.persetujuan ||= {};
   w.divisiKaryawan ||= {};
+  w.tanamBlok ||= {};
   return w;
+}
+
+// ------------------------------------------------ tanggal tanam tiap blok
+// Tabel `blocks` di database desktop tidak punya kolom tanggal tanam, jadi
+// disimpan di bagian `web` (khusus situs, ikut terbawa saat Kirim/Tarik).
+// Dipakai menghitung umur tanaman (MST) dan siklus R0/R1/R2/R3.
+
+export const tanamBlok = (blockId) => web().tanamBlok?.[String(blockId)] || null;
+
+export function setTanamBlok(blockId, tanggal) {
+  const bersih = /^\d{4}-\d{2}-\d{2}$/.test(String(tanggal || '')) ? tanggal : null;
+  setWeb((w) => {
+    w.tanamBlok ||= {};
+    if (bersih) w.tanamBlok[String(blockId)] = bersih;
+    else delete w.tanamBlok[String(blockId)];
+  });
+  return bersih;
 }
 
 // ------------------------------------------------- divisi tiap karyawan
@@ -645,7 +663,7 @@ export function gabungTiga(dasar, lokal, remote) {
     if (lW[kunci] === undefined) delete hasil.web[kunci];
     else hasil.web[kunci] = lW[kunci];
   }
-  for (const sub of ['target', 'kebun', 'unitPremi', 'pengguna', 'targetAlat', 'divisiKaryawan']) {
+  for (const sub of ['target', 'kebun', 'unitPremi', 'pengguna', 'targetAlat', 'divisiKaryawan', 'tanamBlok']) {
     const dS = dW[sub] || {};
     const lS = lW[sub] || {};
     for (const k of new Set([...Object.keys(dS), ...Object.keys(lS)])) {

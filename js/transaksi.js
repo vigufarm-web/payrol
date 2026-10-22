@@ -1470,7 +1470,20 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
       salah.push(`Tarif harus diisi (lebih dari 0). Komponen "${kom?.nama_komponen || '—'}" `
         + 'tarifnya diketik per transaksi.');
     }
+    // Setiap baris WAJIB menempel ke satu blok/tempat yang ada di master —
+    // kalau kosong, laporan per blok jadi bolong dan tidak bisa ditelusuri.
+    // "Tempat" seperti Barak, Packing, atau All Area juga dipilih dari sini.
+    if (pakaiBlok) {
+      if (!inDivisi.value) salah.push('Divisi harus dipilih.');
+      if (!inBlok.value) {
+        salah.push('Blok harus dipilih. Kalau pekerjaannya bukan di blok tanam, '
+          + 'pilih tempatnya (mis. Barak, Packing, All Area).');
+      }
+    }
     const blok = D.cari('blocks', inBlok.value);
+    if (inBlok.value && !blok) {
+      salah.push('Blok yang dipilih sudah tidak ada di Master Blok. Pilih yang lain.');
+    }
     if (blok && inDivisi.value && String(blok.division_id) !== String(inDivisi.value)) {
       salah.push('Blok yang dipilih bukan bagian dari divisi itu.');
     }
@@ -1524,7 +1537,7 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
       }),
     ]),
     hitungan,
-    pakaiBlok ? el('div.baris-isian', {}, [isian('Divisi', inDivisi), isian('Blok', inBlok)]) : null,
+    pakaiBlok ? el('div.baris-isian', {}, [isian('Divisi *', inDivisi), isian('Blok *', inBlok)]) : null,
     isian('Catatan', inCatatan),
   ]);
 
