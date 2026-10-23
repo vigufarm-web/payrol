@@ -752,6 +752,12 @@ async function salinTargetBulanLalu(periode, saatSelesai) {
 // =====================================================================
 // HALAMAN: Persetujuan lembur & premi
 // =====================================================================
+const satuanPersetujuan = (r) => String(
+  r.satuan || D.cari('wage_components', r.wage_component_id)?.satuan
+    || (r._label === 'Lembur' ? 'jam' : 'satuan'),
+).trim();
+const jumlahPersetujuan = (r) => `${angka(r.qty, 2)} ${satuanPersetujuan(r)}`.trim();
+
 /**
  * Daftar lembur/premi yang SUDAH disetujui (30 hari terakhir) — untuk
  * dibatalkan kalau ternyata keliru. Dibatalkan = kembali "menunggu",
@@ -788,6 +794,8 @@ function bagianDiputuskan({ bisaEdit, hak, muatUlang }) {
         { l: 'Tanggal', nilai: (r) => ftanggal(r.tanggal) },
         { l: 'Pekerja', nilai: (r) => D.labelRef('employees', r.employee_id) },
         { l: 'Divisi', nilai: (r) => D.labelRef('divisions', r.division_id) },
+        { l: 'Jumlah', nilai: jumlahPersetujuan },
+        { l: 'Hasil kerja / keterangan', nilai: (r) => r.keterangan_manual || r.catatan || '–' },
         { l: 'Nilai (Rp)', k: 'nominal', jenis: 'uang', total: true },
         { l: 'Di-acc oleh', k: '_oleh' },
         ...(bolehBatal && bisaEdit() ? [{
@@ -943,8 +951,8 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
             { l: 'Blok', nilai: (r) => (r._blok?.size > 1
               ? `${r._blok.size} blok (dibagi)`
               : (r.block_id ? D.labelBlokPada(r.block_id, r.tanggal) : '–')) },
-            { l: 'Jumlah', nilai: (r) => `${angka(r.qty, 2)} ${r.satuan || ''}`.trim() },
-            { l: 'Keterangan', nilai: (r) => r.keterangan_manual || r.catatan || '–' },
+            { l: 'Jumlah', nilai: jumlahPersetujuan },
+            { l: 'Hasil kerja / keterangan', nilai: (r) => r.keterangan_manual || r.catatan || '–' },
             { l: 'Nilai (Rp)', k: 'nominal', jenis: 'uang', total: true },
             {
               l: '',

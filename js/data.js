@@ -222,6 +222,58 @@ export function pakaiDraf(draf) {
   tandaiBerubah();
 }
 
+// ---------------------------------------------------------------------
+// CADANGAN VERSI TERSIMPAN — dua salinan terenkripsi terakhir per dataset.
+// Berbeda dari draf: cadangan menyimpan keadaan SEBELUM penyimpanan, sehingga
+// kesalahan yang telanjur terkirim tetap dapat dipulihkan dengan satu tombol.
+// ---------------------------------------------------------------------
+const kunciCadangan = () => `app.cadangan.${state.path}`;
+
+async function simpanCadanganLokal() {
+  if (!state.password || !state.dasarJson) return;
+  try {
+    const data = JSON.parse(state.dasarJson);
+    const amp = await kunciAmplop(data, state.password, { cadangan: true, rev: Number(data.rev) || 0 });
+    const lama = JSON.parse(localStorage.getItem(kunciCadangan()) || '[]');
+    const waktu = new Date().toISOString();
+    const daftar = [{ id: waktu, waktu, rev: Number(data.rev) || 0, amp },
+      ...lama.filter((x) => Number(x.rev) !== Number(data.rev))].slice(0, 2);
+    localStorage.setItem(kunciCadangan(), JSON.stringify(daftar));
+  } catch { /* penyimpanan penuh/terblokir — GitHub tetap menjadi cadangan utama */ }
+}
+
+export function daftarCadanganLokal() {
+  try {
+    return JSON.parse(localStorage.getItem(kunciCadangan()) || '[]')
+      .map(({ id, waktu, rev }) => ({ id, waktu, rev }));
+  } catch { return []; }
+}
+
+export async function pulihkanCadanganLokal(id) {
+  const daftar = JSON.parse(localStorage.getItem(kunciCadangan()) || '[]');
+  const cadangan = daftar.find((x) => x.id === id);
+  if (!cadangan) throw new Error('Cadangan lokal tidak ditemukan.');
+  const data = await bukaAmplop(cadangan.amp, state.password);
+  if (data.aplikasi !== state.aplikasi) throw new Error('Cadangan berasal dari bagian aplikasi lain.');
+  data.rev = Math.max(Number(state.data?.rev) || 0, Number(data.rev) || 0);
+  state.data = data;
+  gh.setTokenBersama(data.web?.token || '');
+  tandaiBerubah();
+  return data;
+}
+
+export async function pulihkanVersiGitHub(ref) {
+  const { isi } = await gh.bacaFilePadaRef(state.path, ref);
+  if (!isi) throw new Error('Versi GitHub tidak ditemukan.');
+  const data = await bukaAmplop(isi, state.password);
+  if (data.aplikasi !== state.aplikasi) throw new Error('Versi berasal dari bagian aplikasi lain.');
+  data.rev = Math.max(Number(state.data?.rev) || 0, Number(data.rev) || 0);
+  state.data = data;
+  gh.setTokenBersama(data.web?.token || '');
+  tandaiBerubah();
+  return data;
+}
+
 export function web() {
   if (!state.data) return WEB_KOSONG();
   if (!state.data.web) state.data.web = WEB_KOSONG();
@@ -633,6 +685,7 @@ export async function simpan(pesan) {
   if (!state.data) throw new Error('Belum ada data yang dimuat.');
   if (!state.password) throw new Error('Password data belum dimasukkan.');
   state.gabungTerakhir = 0;
+  await simpanCadanganLokal();
 
   const judul = namaPengisi() ? `${pesan} (${namaPengisi()})` : pesan;
   // Dua admin bisa menyimpan hampir bersamaan: yang kedua kena tolak (409).

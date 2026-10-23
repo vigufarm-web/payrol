@@ -26,6 +26,7 @@ import { halamanSistem, halamanRiwayat } from './sistem.js';
 import { halamanImpor } from './impor.js';
 import { halamanLaporanKebun, halamanPengaturanKebun, halamanPersetujuan, jumlahMenunggu } from './kebun.js';
 import { halamanMonitorSemua } from './monitor-semua.js';
+import { halamanPemeriksaan } from './pemeriksaan.js';
 import * as P from './pengguna.js';
 import { halamanPengguna } from './pengguna.js';
 
@@ -90,9 +91,9 @@ const MODUL = {
       { judul: 'Input data', item: ['hk', 'borongan', 'lembur', 'impor'] },
       { judul: 'Kepala kebun', item: ['persetujuan', 'target'] },
     ],
-    sistem: ['terhapus', 'riwayat', 'pengguna', 'sistem'],
+    sistem: ['terhapus', 'kualitas', 'riwayat', 'pengguna', 'sistem'],
     halaman: {
-      semua: { l: 'Monitoring Semua Divisi', sub: 'Operasional + alat berat & kendaraan jadi satu', buat: halamanMonitorSemua, periode: true },
+      semua: { l: 'Pantauan', sub: 'Satu layar untuk seluruh divisi dan alat berat & kendaraan', buat: halamanMonitorSemua, periode: true },
       ringkasan: { l: 'Ringkasan', sub: 'Angka utama periode berjalan', buat: halamanRingkasan, periode: true },
       payroll: { l: 'Payroll', sub: 'Upah per pekerja untuk satu periode', buat: halamanPayroll, periode: true },
       rekap: { l: 'Rekap', sub: 'Biaya per divisi, blok, dan kegiatan', buat: halamanRekap, periode: true },
@@ -104,6 +105,7 @@ const MODUL = {
       lembur: { l: 'Lembur & premi', sub: 'Tambahan di luar HK harian', buat: halamanLemburPremi, periode: true },
       impor: { l: 'Impor Excel', sub: 'Isi di Excel pakai template, lalu upload di sini', buat: halamanImpor },
       terhapus: { l: 'Data terhapus', sub: 'Transaksi yang dihapus, bisa dipulihkan', buat: halamanTerhapus },
+      kualitas: { l: 'Pemeriksaan data', sub: 'Temukan typo, data ganda, dan hitungan tidak wajar', buat: halamanPemeriksaan },
       riwayat: { l: 'Riwayat perubahan', sub: 'Setiap penyimpanan tercatat di sini', buat: halamanRiwayat },
       pengguna: { l: 'Pengguna', sub: 'Siapa boleh input & revisi divisi mana', buat: halamanPengguna },
       sistem: { l: 'Pengaturan', sub: 'Mode edit, token, dan status data', buat: halamanSistem },
@@ -120,9 +122,9 @@ const MODUL = {
       { judul: 'Input operasional', item: ['log', 'solar', 'servis', 'impor'] },
       { judul: 'Kepala divisi', item: ['monitor', 'persetujuan'] },
     ],
-    sistem: ['riwayat', 'tarifpremi', 'pengguna', 'sistem'],
+    sistem: ['kualitas', 'riwayat', 'tarifpremi', 'pengguna', 'sistem'],
     halaman: {
-      semua: { l: 'Monitoring Semua Divisi', sub: 'Operasional + alat berat & kendaraan jadi satu', buat: halamanMonitorSemua, periode: true },
+      semua: { l: 'Pantauan', sub: 'Satu layar untuk seluruh divisi dan alat berat & kendaraan', buat: halamanMonitorSemua, periode: true },
       unit: { l: 'Ringkasan unit', sub: 'Jam kerja, solar, dan efisiensi tiap unit', buat: halamanRingkasanUnit, periode: true },
       operator: { l: 'Payroll operator', sub: 'Upah operator untuk satu periode', buat: halamanPayrollOperator, periode: true },
       lokasi: { l: 'Biaya per lokasi', sub: 'Tenaga kerja, solar, dan servis per lokasi', buat: halamanBiayaLokasi, periode: true },
@@ -137,6 +139,7 @@ const MODUL = {
       monitor: { l: 'Laporan ALB & Kendaraan', sub: 'Upah, premi, solar, dan servis terhadap target', buat: halamanMonitorAlat, periode: true },
       persetujuan: { l: 'Persetujuan', sub: 'Log harian (HM/KM & premi) menunggu acc', buat: halamanPersetujuanAlat },
       tarifpremi: { l: 'Tarif premi unit', sub: 'Rp per HM dan per KM tiap unit', buat: halamanTarifPremi },
+      kualitas: { l: 'Pemeriksaan data', sub: 'Temukan data ganda, referensi rusak, dan meter tidak wajar', buat: halamanPemeriksaan },
       riwayat: { l: 'Riwayat perubahan', sub: 'Setiap penyimpanan tercatat di sini', buat: halamanRiwayat },
       pengguna: { l: 'Pengguna', sub: 'Siapa boleh input & revisi divisi mana', buat: halamanPengguna },
       sistem: { l: 'Pengaturan', sub: 'Mode edit, token, dan status data', buat: halamanSistem },
@@ -396,13 +399,13 @@ function bangunMenu() {
       el('strong', { teks: D.state.daftar?.dataset?.[D.state.path]?.label || m.nama }),
       el('span', { teks: m.keterangan }),
     ]),
-    // Monitoring Semua Divisi — khusus admin penuh. Ditaruh di atas tombol
-    // pindah bagian supaya admin tidak perlu bolak-balik antar bagian.
+    // Satu pintu pantauan — khusus admin penuh. Detail tetap tersedia di
+    // laporan tiap bagian, tetapi tidak lagi disebut sebagai monitor lain.
     P.bolehMonitorSemua()
       ? el('div', { style: 'padding:.6rem 1.1rem .2rem' }, [
         el('button.tombol-kecil', {
           type: 'button', style: 'width:100%',
-          teks: 'Monitoring Semua Divisi',
+          teks: 'Pantauan',
           'aria-current': rute().nama === 'semua' ? 'page' : null,
           onclick: () => { location.hash = '#/semua'; },
         }),

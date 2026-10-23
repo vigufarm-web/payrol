@@ -1,4 +1,4 @@
-// monitor-semua.js — "Monitoring Semua Divisi": satu halaman yang menyatukan
+// monitor-semua.js — "Pantauan": satu halaman yang menyatukan
 // angka dari SEMUA bagian di repo ini — Payroll Operasional (semua divisi)
 // dan Alat Berat & Kendaraan — supaya admin bisa memantau semuanya tanpa
 // berpindah-pindah bagian.
@@ -84,7 +84,8 @@ function hitungPayroll(data, dari, sampai) {
         jenis: 'Operasional',
         orang: new Set(),
         hk: 0, pokok: 0, lembur: 0, premi: 0,
-        tunggu: 0, tungguRp: 0,
+        solar: 0, servis: 0,
+        tungguGrup: new Set(), tungguRp: 0,
       });
     }
     return per.get(k);
@@ -109,7 +110,10 @@ function hitungPayroll(data, dari, sampai) {
       if (r.deleted_at) continue;             // dihapus / ditolak
       const b = ambil(r.division_id);
       if (menungguDi(data, tabelNama, r.id)) {
-        b.tunggu += 1;                        // belum di-acc: tidak ikut total
+        // Satu lembur yang dibagi ke beberapa blok hanya satu pekerjaan dan
+        // satu keputusan. Pantauan harus menghitung grup, bukan pecahan baris.
+        b.tungguGrup.add([tabelNama, r.employee_id, r.tanggal,
+          r.wage_component_id, r.keterangan_manual || r.catatan || ''].join('|'));
         b.tungguRp += nol(r.nominal);
         continue;
       }
@@ -118,11 +122,15 @@ function hitungPayroll(data, dari, sampai) {
       b[kantong] += nol(r.nominal);
     }
   }
-  return [...per.values()].map((b) => ({
-    ...b,
-    orang: b.orang.size,
-    total: b.pokok + b.lembur + b.premi,
-  })).sort((a, b) => String(a.divisi).localeCompare(String(b.divisi), 'id'));
+  return [...per.values()].map((b) => {
+    const { tungguGrup, ...hasil } = b;
+    return {
+      ...hasil,
+      orang: b.orang.size,
+      tunggu: tungguGrup.size,
+      total: b.pokok + b.lembur + b.premi,
+    };
+  }).sort((a, b) => String(a.divisi).localeCompare(String(b.divisi), 'id'));
 }
 
 /** Ringkasan per unit dari satu bagian Alat Berat & Kendaraan. */
@@ -216,6 +224,7 @@ function mentahPayroll(data, dari, sampai) {
   const keg = peta('activities', 'nama_kegiatan');
   const jen = peta('job_types', 'nama_jenis');
   const komp = peta('wage_components', 'nama_komponen');
+  const satKomp = peta('wage_components', 'satuan');
   const emp = new Map(barisDi(data, 'employees').map((r) => [Number(r.id), r]));
   const nm = (m, id) => (id == null || id === '' ? '' : (m.get(Number(id)) || `#${id}`));
   const keluar = [];
@@ -241,14 +250,15 @@ function mentahPayroll(data, dari, sampai) {
   }
   for (const r of barisDi(data, 'borongan_transactions')) {
     if (r.tanggal < dari || r.tanggal > sampai) continue;
-    tambah('Borongan', r, { qty: nol(r.qty), satuan: r.satuan || '',
+    tambah('Borongan', r, { qty: nol(r.qty), satuan: r.satuan || satKomp.get(Number(r.wage_component_id)) || 'satuan',
       tarif: nol(r.tarif_snapshot), komponen: nm(komp, r.wage_component_id),
       acc: STATUS_BARIS(data, 'borongan_transactions', r) });
   }
   for (const [nmTabel, label] of [['lembur_transactions', 'Lembur'], ['premi_transactions', 'Premi']]) {
     for (const r of barisDi(data, nmTabel)) {
       if (r.tanggal < dari || r.tanggal > sampai) continue;
-      tambah(label, r, { qty: nol(r.qty), satuan: r.satuan || '',
+      tambah(label, r, { qty: nol(r.qty),
+        satuan: r.satuan || satKomp.get(Number(r.wage_component_id)) || (label === 'Lembur' ? 'jam' : 'satuan'),
         tarif: nol(r.tarif_snapshot), komponen: nm(komp, r.wage_component_id),
         acc: STATUS_BARIS(data, nmTabel, r) });
     }
@@ -380,6 +390,16 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
       for (const b of bagian) {
         if (b.aplikasi === 'AlatBerat') unitRingkas.push(...hitungAlat(b.data, dari, sampai));
       }
+      if (unitRingkas.length) {
+        const jumlahUnit = (k) => unitRingkas.reduce((n, r) => n + nol(r[k]), 0);
+        ringkas.push({
+          divisi: 'Alat Berat & Kendaraan', jenis: 'Unit',
+          orang: new Set(unitRingkas.map((r) => r.unit)).size,
+          hk: jumlahUnit('hkOp'), pokok: jumlahUnit('upah'), lembur: 0,
+          premi: jumlahUnit('premi'), solar: jumlahUnit('solar'), servis: jumlahUnit('servis'),
+          total: jumlahUnit('total'), tunggu: jumlahUnit('tunggu'),
+        });
+      }
 
       const kepala = (judul, kolom) => [
         [S.judul(`PT VIGU FARM INDONESIA — ${judul}`)],
@@ -392,18 +412,21 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
       // --- lembar 1: ringkasan per divisi
       lembar.push({
         nama: 'Ringkasan',
-        lebar: [26, 14, 12, 10, 16, 14, 14, 16, 14],
+        lebar: [26, 14, 12, 10, 16, 14, 14, 14, 14, 16, 14],
         baris: [
           ...kepala('Ringkasan Semua Divisi',
-            ['Divisi', 'Jenis', 'Orang/unit', 'HK', 'Upah pokok', 'Lembur', 'Premi', 'Total', 'Menunggu acc']),
+            ['Divisi', 'Jenis', 'Orang/unit', 'HK', 'Upah pokok', 'Lembur', 'Premi',
+              'Solar', 'Servis', 'Total', 'Menunggu acc']),
           ...ringkas.map((r) => [S.teks(r.divisi), S.teks(r.jenis), S.angka(r.orang),
             S.angka(r.hk), S.uang(r.pokok), S.uang(r.lembur), S.uang(r.premi),
-            S.uang(r.total), S.angka(r.tunggu)]),
+            S.uang(r.solar), S.uang(r.servis), S.uang(r.total), S.angka(r.tunggu)]),
           [S.teksT('TOTAL'), S.teksT(''), S.angkaT(ringkas.reduce((n, r) => n + nol(r.orang), 0)),
             S.angkaT(ringkas.reduce((n, r) => n + nol(r.hk), 0)),
             S.uangT(ringkas.reduce((n, r) => n + nol(r.pokok), 0)),
             S.uangT(ringkas.reduce((n, r) => n + nol(r.lembur), 0)),
             S.uangT(ringkas.reduce((n, r) => n + nol(r.premi), 0)),
+            S.uangT(ringkas.reduce((n, r) => n + nol(r.solar), 0)),
+            S.uangT(ringkas.reduce((n, r) => n + nol(r.servis), 0)),
             S.uangT(ringkas.reduce((n, r) => n + nol(r.total), 0)),
             S.angkaT(ringkas.reduce((n, r) => n + nol(r.tunggu), 0))],
         ],
@@ -469,7 +492,7 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
         });
       }
 
-      const berkas = `Monitoring_${judulPeriode.replace(/[^\w]+/g, '_')}.xlsx`;
+      const berkas = `Pantauan_${judulPeriode.replace(/[^\w]+/g, '_')}.xlsx`;
       await unduhXlsx(berkas, lembar);
       pesan(`${berkas} diunduh — ${mentahOp.length} baris operasional, `
         + `${mentahAl.length} baris alat berat.`, 'sukses', 8);
@@ -527,37 +550,18 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
         pokok: jml(barisUnit, 'upah'),
         lembur: 0,
         premi: jml(barisUnit, 'premi'),
+        solar: jml(barisUnit, 'solar'),
+        servis: jml(barisUnit, 'servis'),
         tunggu: tungguAlat,
         tungguRp: 0,
-        total: upahAlat,
+        total: upahAlat + biayaUnit,
       });
     }
 
     taruh(kosongkan(tempat),
-      el('div.lembar', {}, [
-        el('dl.angka-utama', {}, [
-          kotak('Total HK pekerja', fhk(totalHk), 'HK'),
-          kotak('Upah operasional', rupiah(upahOperasional), 'Rp'),
-          kotak('Upah operator alat', rupiah(upahAlat), 'Rp'),
-          kotak('Solar + servis', rupiah(biayaUnit), 'Rp'),
-          kotak('TOTAL SEMUA', rupiah(upahOperasional + upahAlat + biayaUnit), 'Rp'),
-        ]),
-        el('p.bantuan', {
-          teks: 'Lembur, premi, dan log alat yang masih menunggu acc kepala divisi '
-            + 'BELUM ikut dihitung di angka-angka ini — jumlahnya ada di kolom "Menunggu acc".',
-        }),
-      ]),
-
-      gagal.length
-        ? el('div.kesalahan', { role: 'alert',
-          teks: `Bagian ini tidak bisa dibaca: ${gagal.join(', ')}. `
-            + 'Biasanya karena passwordnya berbeda atau berkasnya belum diupload. '
-            + 'Angka di halaman ini belum termasuk bagian tersebut.' })
-        : null,
-
-      el('div.lembar', {}, [
+      el('div.lembar.pantauan-utama', {}, [
         el('div.lembar-kepala', {}, [
-          el('h2', { teks: `Semua divisi — ${periode.judul()}` }),
+          el('h2', { teks: `Pantauan operasional — ${periode.judul()}` }),
           el('button.tombol-samar.tombol-kecil', {
             type: 'button', teks: 'Ambil data terbaru',
             onclick: () => {
@@ -576,6 +580,24 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
           }),
         ]),
         el('div.lembar-isi', {}, [
+          el('dl.angka-utama', {}, [
+            kotak('Total HK pekerja', fhk(totalHk), 'HK'),
+            kotak('Upah operasional', rupiah(upahOperasional), 'Rp'),
+            kotak('Upah operator alat', rupiah(upahAlat), 'Rp'),
+            kotak('Solar + servis', rupiah(biayaUnit), 'Rp'),
+            kotak('Total biaya', rupiah(upahOperasional + upahAlat + biayaUnit), 'Rp'),
+          ]),
+          el('p.bantuan.pantauan-catatan', {
+            teks: 'Angka hanya memuat transaksi yang sudah disetujui. Kolom "Menunggu acc" '
+              + 'menunjukkan pekerjaan yang belum masuk ke total.',
+          }),
+          gagal.length
+            ? el('div.kesalahan', { role: 'alert',
+              teks: `Bagian ini tidak bisa dibaca: ${gagal.join(', ')}. `
+                + 'Biasanya karena password berbeda atau berkas belum diunggah. '
+                + 'Angka di pantauan belum mencakup bagian tersebut.' })
+            : null,
+          el('h3.pantauan-subjudul', { teks: 'Ringkasan seluruh divisi' }),
           tabel([
             { l: 'Divisi', k: 'divisi' },
             { l: 'Jenis', k: 'jenis' },
@@ -584,58 +606,57 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
             { l: 'Upah pokok (Rp)', k: 'pokok', jenis: 'uang', total: true },
             { l: 'Lembur (Rp)', k: 'lembur', jenis: 'uang', total: true },
             { l: 'Premi (Rp)', k: 'premi', jenis: 'uang', total: true },
-            { l: 'Total (Rp)', k: 'total', jenis: 'uang', total: true },
-            { l: 'Menunggu acc', k: 'tunggu', jenis: 'angka', total: true },
-          ], semuaDivisi, { kosong: `Belum ada data pada ${periode.judul()}.` }),
-        ]),
-      ]),
-
-      barisUnit.length ? el('div.lembar', {}, [
-        el('div.lembar-kepala', {}, [el('h2', { teks: 'Alat berat & kendaraan — per unit' })]),
-        el('div.lembar-isi', {}, [
-          tabel([
-            { l: 'Unit', k: 'unit' },
-            { l: 'Kategori', k: 'kategori' },
-            { l: 'Hari operasi', k: 'hari_operasi', jenis: 'angka', total: true },
-            { l: 'HM', k: 'hm', jenis: 'angka', pecahan: 1, total: true },
-            { l: 'KM', k: 'km', jenis: 'angka', pecahan: 1, total: true },
-            { l: 'Ritase', k: 'ritase', jenis: 'angka', total: true },
-            { l: 'Liter', k: 'liter', jenis: 'angka', pecahan: 1, total: true },
-            { l: 'Ltr/KM', nilai: (r) => (r.ltr_km == null ? '–' : angka(r.ltr_km, 2)), rata: 'angka' },
-            { l: 'HM/Ltr', nilai: (r) => (r.hm_ltr == null ? '–' : angka(r.hm_ltr, 2)), rata: 'angka' },
-            { l: 'Upah operator (Rp)', k: 'upah', jenis: 'uang', total: true },
-            { l: 'Premi (Rp)', k: 'premi', jenis: 'uang', total: true },
             { l: 'Solar (Rp)', k: 'solar', jenis: 'uang', total: true },
             { l: 'Servis (Rp)', k: 'servis', jenis: 'uang', total: true },
             { l: 'Total (Rp)', k: 'total', jenis: 'uang', total: true },
-          ], barisUnit, { kosong: 'Belum ada kegiatan unit pada periode ini.' }),
-          el('p.bantuan', {
-            teks: 'Ltr/KM untuk dump truck & kendaraan (makin kecil makin irit). '
-              + 'HM/Ltr untuk alat berat (makin besar makin irit).',
-          }),
-        ]),
-      ]) : null,
-
-      el('div.lembar', {}, [
-        el('div.lembar-kepala', {}, [el('h2', { teks: 'Status data tiap bagian' })]),
-        el('div.lembar-isi', {}, [
-          tabel([
-            { l: 'Bagian', k: 'bagian' },
-            { l: 'Revisi', k: 'rev', jenis: 'angka' },
-            { l: 'Terakhir disimpan', nilai: (r) => (r.diperbarui ? waktu(r.diperbarui) : '–') },
-            { l: 'Sumber', k: 'sumber' },
-          ], statusData, { kosong: 'Tidak ada bagian terbaca.' }),
-          (tungguOperasional || tungguAlat)
-            ? el('p.bantuan', {
-              teks: `Menunggu acc kepala divisi: ${tungguOperasional} lembur/premi `
-                + `di payroll operasional dan ${tungguAlat} log di alat berat & kendaraan.`,
-            })
-            : el('p.bantuan', { teks: 'Tidak ada yang menunggu acc pada periode ini.' }),
+            { l: 'Menunggu acc', k: 'tunggu', jenis: 'angka', total: true },
+          ], semuaDivisi, { kosong: `Belum ada data pada ${periode.judul()}.` }),
+          barisUnit.length ? el('details.pantauan-rincian', {}, [
+            el('summary', { teks: `Rincian alat berat & kendaraan (${barisUnit.length} unit)` }),
+            el('div.pantauan-rincian-isi', {}, [
+              tabel([
+                { l: 'Unit', k: 'unit' },
+                { l: 'Kategori', k: 'kategori' },
+                { l: 'Hari operasi', k: 'hari_operasi', jenis: 'angka', total: true },
+                { l: 'HM', k: 'hm', jenis: 'angka', pecahan: 1, total: true },
+                { l: 'KM', k: 'km', jenis: 'angka', pecahan: 1, total: true },
+                { l: 'Ritase', k: 'ritase', jenis: 'angka', total: true },
+                { l: 'Liter', k: 'liter', jenis: 'angka', pecahan: 1, total: true },
+                { l: 'Ltr/KM', nilai: (r) => (r.ltr_km == null ? '–' : angka(r.ltr_km, 2)), rata: 'angka' },
+                { l: 'HM/Ltr', nilai: (r) => (r.hm_ltr == null ? '–' : angka(r.hm_ltr, 2)), rata: 'angka' },
+                { l: 'Upah operator (Rp)', k: 'upah', jenis: 'uang', total: true },
+                { l: 'Premi (Rp)', k: 'premi', jenis: 'uang', total: true },
+                { l: 'Solar (Rp)', k: 'solar', jenis: 'uang', total: true },
+                { l: 'Servis (Rp)', k: 'servis', jenis: 'uang', total: true },
+                { l: 'Total (Rp)', k: 'total', jenis: 'uang', total: true },
+              ], barisUnit, { kosong: 'Belum ada kegiatan unit pada periode ini.' }),
+              el('p.bantuan', {
+                teks: 'Ltr/KM untuk kendaraan (makin kecil makin irit). '
+                  + 'HM/Ltr untuk alat berat (makin besar makin irit).',
+              }),
+            ]),
+          ]) : null,
+          el('details.pantauan-rincian', {}, [
+            el('summary', { teks: `Status sumber data (${statusData.length} bagian)` }),
+            el('div.pantauan-rincian-isi', {}, [
+              tabel([
+                { l: 'Bagian', k: 'bagian' },
+                { l: 'Revisi', k: 'rev', jenis: 'angka' },
+                { l: 'Terakhir disimpan', nilai: (r) => (r.diperbarui ? waktu(r.diperbarui) : '–') },
+                { l: 'Sumber', k: 'sumber' },
+              ], statusData, { kosong: 'Tidak ada bagian terbaca.' }),
+              (tungguOperasional || tungguAlat)
+                ? el('p.bantuan', {
+                  teks: `Menunggu acc: ${tungguOperasional} lembur/premi dan ${tungguAlat} log alat.`,
+                })
+                : el('p.bantuan', { teks: 'Tidak ada transaksi yang menunggu persetujuan.' }),
+            ]),
+          ]),
         ]),
       ]),
     );
   };
 
-  gambarIsi().catch((e) => pesan(`Gagal menyusun monitoring: ${e.message}`, 'galat', 6));
+  gambarIsi().catch((e) => pesan(`Gagal menyusun pantauan: ${e.message}`, 'galat', 6));
   return wadah;
 }

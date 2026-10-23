@@ -134,6 +134,23 @@ export async function bacaFile(path, { token = ambilToken() } = {}) {
   return { isi: await r.json(), sha: '' };
 }
 
+/** Baca isi file pada commit tertentu. Dipakai pemulihan versi lama; tidak
+ *  mengubah branch atau repo sampai pengguna menyimpan hasil pemulihan. */
+export async function bacaFilePadaRef(path, ref, { token = ambilToken() } = {}) {
+  const repo = lokasiRepo();
+  if (!repo) throw new Error('Alamat repo tidak dikenali.');
+  const url = `${API}/repos/${repo.owner}/${repo.repo}/contents/${path}?ref=${encodeURIComponent(ref)}`;
+  const badan = await minta('GET', url, null, token);
+  let teks;
+  if (badan.content && badan.encoding === 'base64') {
+    teks = dariBase64(badan.content);
+  } else {
+    const blob = await minta('GET', `${API}/repos/${repo.owner}/${repo.repo}/git/blobs/${badan.sha}`, null, token);
+    teks = dariBase64(blob.content);
+  }
+  return { isi: JSON.parse(teks), sha: badan.sha };
+}
+
 /** Simpan file JSON ke repo (satu commit). Mengembalikan sha baru. */
 export async function tulisFile(path, objek, sha, pesan, { token = ambilToken() } = {}) {
   if (!token) throw new Error('Belum ada token GitHub. Masuk mode edit dulu.');
@@ -173,6 +190,7 @@ export async function daftarCommit(path, { batas = 30, token = ambilToken() } = 
   const badan = await minta('GET', url, null, token);
   return (badan || []).map((c) => ({
     sha: c.sha.slice(0, 7),
+    fullSha: c.sha,
     pesan: c.commit?.message?.split('\n')[0] || '',
     waktu: c.commit?.author?.date || '',
     oleh: c.commit?.author?.name || c.author?.login || '',

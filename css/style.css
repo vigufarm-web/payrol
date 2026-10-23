@@ -161,6 +161,39 @@ a { color: var(--hijau-tua); }
 .angka-utama dd small { font-size: 0.8rem; font-weight: 400; color: var(--tinta-samar); }
 .angka-utama .satuan { font-size: 0.85rem; color: var(--tinta-samar); font-weight: 400; }
 
+/* Pantauan memakai satu permukaan utama. Rincian sekunder tetap tersedia,
+   tetapi tertutup sampai dibutuhkan agar layar tidak penuh panel. */
+.pantauan-catatan { margin: .75rem 0 1rem; }
+.pantauan-subjudul { margin: 1.2rem 0 .65rem; font-size: 1rem; }
+.pantauan-rincian {
+  margin-top: 1rem;
+  border-top: 1px solid var(--garis);
+}
+.pantauan-rincian summary {
+  cursor: pointer;
+  padding: .9rem .15rem;
+  color: var(--hijau);
+  font-weight: 650;
+}
+.pantauan-rincian summary:hover { text-decoration: underline; }
+.pantauan-rincian-isi { padding: 0 0 .9rem; }
+
+.saran-ejaan {
+  margin-top: .35rem;
+  color: var(--kuning);
+  font-size: .82rem;
+}
+.tombol-tautan {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--hijau);
+  font: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* ------------------------------------------------------------- tabel */
 .tabel-bungkus { overflow-x: auto; }
 .tabel { width: 100%; border-collapse: collapse; font-size: 0.9rem; }

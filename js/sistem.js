@@ -254,8 +254,38 @@ export function halamanSistem({ gambar, bisaEdit, muatUlangData }) {
 // =====================================================================
 // RIWAYAT PERUBAHAN
 // =====================================================================
-export function halamanRiwayat() {
+export function halamanRiwayat({ bisaEdit = () => false, gambar = () => {} } = {}) {
   const tempat = el('div', {}, [el('p.bantuan', { teks: 'Mengambil riwayat dari GitHub…' })]);
+  const cadangan = D.daftarCadanganLokal();
+  const kotakCadangan = el('div.lembar', { style: 'margin-top:1.4rem' }, [
+    el('div.lembar-kepala', {}, [el('h2', { teks: 'Cadangan lokal otomatis' })]),
+    el('div.lembar-isi', {}, [
+      el('p.bantuan', {
+        teks: 'Sebelum setiap penyimpanan, aplikasi menyimpan dua versi sebelumnya secara terenkripsi di peramban ini.',
+      }),
+      tabel([
+        { l: 'Waktu cadangan', nilai: (r) => waktu(r.waktu) },
+        { l: 'Revisi', k: 'rev', jenis: 'angka' },
+        {
+          l: '', nilai: (r) => bisaEdit() ? el('button.tombol-samar.tombol-kecil', {
+            type: 'button', teks: 'Pulihkan',
+            onclick: async () => {
+              const lanjut = await tanya('Pulihkan cadangan lokal?', el('div', {}, [
+                el('p', { teks: `Data aktif akan diganti sementara dengan cadangan rev ${r.rev}.` }),
+                el('p.bantuan', { teks: 'GitHub belum berubah. Periksa hasilnya, lalu klik Simpan ke GitHub jika benar.' }),
+              ]), { ya: 'Pulihkan', tidak: 'Batal' });
+              if (!lanjut) return;
+              try {
+                await D.pulihkanCadanganLokal(r.id);
+                pesan('Cadangan dimuat. Periksa data lalu Simpan ke GitHub.', 'sukses', 8);
+                gambar();
+              } catch (e) { pesan(`Gagal memulihkan: ${e.message}`, 'galat', 8); }
+            },
+          }) : null,
+        },
+      ], cadangan, { kosong: 'Cadangan lokal akan muncul setelah penyimpanan berikutnya.' }),
+    ]),
+  ]);
 
   if (D.modeLokal()) {
     kosongkan(tempat).append(el('p.kosong', {
@@ -267,6 +297,7 @@ export function halamanRiwayat() {
         el('div.lembar-kepala', {}, [el('h2', { teks: 'Riwayat perubahan' })]),
         el('div.lembar-isi', {}, [tempat]),
       ]),
+      kotakCadangan,
     ]);
   }
 
@@ -276,6 +307,23 @@ export function halamanRiwayat() {
       { l: 'Perubahan', k: 'pesan' },
       { l: 'Akun GitHub', k: 'oleh' },
       { l: 'Kode', k: 'sha' },
+      {
+        l: '', nilai: (r) => bisaEdit() ? el('button.tombol-samar.tombol-kecil', {
+          type: 'button', teks: 'Pulihkan',
+          onclick: async () => {
+            const lanjut = await tanya('Pulihkan versi GitHub?', el('div', {}, [
+              el('p', { teks: `Versi ${r.sha} (${waktu(r.waktu)}) akan dimuat sebagai perubahan baru.` }),
+              el('p.bantuan', { teks: 'Riwayat lama tidak dihapus. GitHub baru berubah setelah tombol Simpan ke GitHub ditekan.' }),
+            ]), { ya: 'Pulihkan', tidak: 'Batal' });
+            if (!lanjut) return;
+            try {
+              await D.pulihkanVersiGitHub(r.fullSha);
+              pesan('Versi lama dimuat. Periksa data lalu Simpan ke GitHub.', 'sukses', 8);
+              gambar();
+            } catch (e) { pesan(`Gagal memulihkan: ${e.message}`, 'galat', 8); }
+          },
+        }) : null,
+      },
     ], daftar, { kosong: 'Belum ada riwayat penyimpanan.' }));
   }).catch((e) => {
     kosongkan(tempat).append(el('div.kesalahan', { role: 'alert' }, [e.message]));
@@ -292,5 +340,6 @@ export function halamanRiwayat() {
         tempat,
       ]),
     ]),
+    kotakCadangan,
   ]);
 }

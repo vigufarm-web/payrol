@@ -8,6 +8,10 @@ Situs untuk melihat **dan mengisi** data dua aplikasi desktop sekaligus:
 | **Alat Berat & Kendaraan** *(Divisi Infrastruktur)* | Log harian unit (HM/KM/ritase), isi solar, servis, payroll operator, biaya per lokasi, laporan harian siap tempel ke WhatsApp |
 | **Kepala kebun** | Laporan biaya operasional per kebun (HK + rupiah) per bulan / per paruh bulan, target biaya, persetujuan lembur & premi |
 
+Admin penuh memakai satu menu **Pantauan** untuk ringkasan seluruh divisi dan alat
+berat. Rincian unit serta status sumber data dapat dibuka bila diperlukan, sehingga
+halaman utama tetap ringkas.
+
 Repo ini sekaligus jadi **database**: isi database dikemas jadi satu file JSON
 **terenkripsi** di folder `data/`. Tanpa password, isinya tidak bisa dibaca siapa pun —
 termasuk orang yang membuka repo ini.
@@ -207,6 +211,20 @@ Divisi, blok, dan kegiatan terakhir **diingat** supaya tidak perlu dipilih ulang
 setiap baris. Borongan tetap di menunya sendiri karena satuannya beda (per hasil
 kerja, bukan per HK).
 
+Pada form **Lembur, Premi, dan Borongan**, kolom **Satuan** wajib diisi. Nilainya
+terisi otomatis dari Komponen Upah, tetapi dapat disesuaikan per transaksi
+(mis. jam, kg, batang, lubang, atau rit). Kolom **Hasil kerja / keterangan** ikut
+ditampilkan di daftar dan halaman persetujuan agar pekerjaan mudah diaudit.
+
+Kolom pekerjaan dan keterangan juga merapikan spasi otomatis. Jika ejaan hanya
+berbeda kapital/tanda baca, aplikasi memakai ejaan lama yang paling sering dipakai.
+Jika terdeteksi kemungkinan typo 1–2 karakter, aplikasi menawarkan ejaan lama saat
+isian ditinggalkan dan meminta konfirmasi lagi sebelum menyimpan.
+
+Nominal positif di bawah **Rp1.000** pada HK, borongan, lembur, atau premi juga
+memunculkan konfirmasi. Nilainya tetap boleh disimpan jika benar; peringatan ini
+mencegah kekurangan angka atau nol lolos tanpa disadari.
+
 Pengaman: total HK satu pekerja dalam satu hari **tidak boleh lebih dari 1**. Kalau
 terlampaui, barisnya ditolak dengan keterangan jelas — berlaku untuk keempat cara di
 atas. Dan kalau ada data lama yang telanjur melebihi batas (misalnya kiriman dari
@@ -383,6 +401,23 @@ menyimpan apa dan kapan. Versi lama tidak terhapus, jadi data bisa dikembalikan 
 keadaan kemarin lewat riwayat commit GitHub bila perlu — repo ini sekaligus
 **cadangan di luar kantor**.
 
+Sebelum setiap penyimpanan, situs juga membuat **cadangan lokal otomatis** di
+perangkat yang dipakai (dua versi terakhir untuk tiap dataset). Dari halaman riwayat,
+admin dapat memulihkan cadangan lokal atau versi commit GitHub. Pemulihan hanya
+memuat versi pilihan sebagai perubahan lokal; klik **Simpan ke GitHub** setelah isinya
+dipastikan benar.
+
+### Pemeriksaan kualitas data
+
+Admin mendapat menu **Pemeriksaan data**. Pemeriksaan ini menandai referensi master
+yang rusak, satuan kosong, tarif nol, nominal yang tidak cocok, total HK di atas batas,
+persetujuan yang terlalu lama, meter mundur, catatan solar tidak lengkap, kemungkinan
+transaksi ganda, dan variasi keterangan akibat typo atau spasi.
+
+Tombol **Perbaiki aman** hanya mengisi satuan yang kosong dan merapikan teks tanpa
+mengubah angka keuangan atau menghapus transaksi. Kemungkinan transaksi ganda dan
+perbedaan nominal tetap harus diputuskan manusia agar data yang sah tidak hilang.
+
 ---
 
 ## 4. Isi folder
@@ -395,6 +430,9 @@ js/github.js          baca & tulis file lewat GitHub API
 js/data.js            isi database di memori, simpan & muat
 js/ui.js              perkakas tabel, form, dialog
 js/app.js             kerangka, menu, perpindahan halaman
+js/teks.js            normalisasi spasi dan saran typo
+js/kualitas-data.js   mesin pemeriksaan kualitas data
+js/pemeriksaan.js     halaman pemeriksaan dan perbaikan aman
 js/skema-payroll.js   definisi tabel bagian Payroll
 js/skema-alat.js      definisi tabel bagian Alat Berat & Kendaraan
 js/master.js          halaman master data (dipakai kedua bagian)
@@ -409,6 +447,8 @@ js/impor.js           impor dari Excel
 js/xlsx.js            pembaca .xlsx tanpa pustaka luar
 templates/            template Excel untuk diisi harian
 data/                 file data terenkripsi (dibuat aplikasi desktop)
+tests/                tes otomatis normalisasi dan pemeriksaan data
+package.json          perintah tes (`npm test`, tanpa instalasi paket)
 .nojekyll             matikan pemrosesan Jekyll di GitHub Pages
 ```
 

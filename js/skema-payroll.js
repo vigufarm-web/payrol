@@ -97,7 +97,7 @@ export const TABEL = {
       { k: 'kode_komponen', l: 'Kode', t: 'text', wajib: true, unik: true },
       { k: 'kategori', l: 'Kategori', t: 'enum', pilihan: KATEGORI_UPAH, wajib: true },
       { k: 'nama_komponen', l: 'Nama komponen', t: 'text', wajib: true },
-      { k: 'satuan', l: 'Satuan', t: 'text' },
+      { k: 'satuan', l: 'Satuan hasil/upah', t: 'text', wajib: true },
       { k: 'tarif', l: 'Tarif', t: 'money', wajib: true },
       { k: 'status', l: 'Status', t: 'enum', pilihan: STATUS, bawaan: 'Aktif' },
     ],

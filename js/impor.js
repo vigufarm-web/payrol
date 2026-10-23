@@ -13,6 +13,7 @@ import { mst, siklusBlok, dasarNamaBlok, hariIniIso } from './siklus.js';
 import { bacaExcel, bisaBacaExcel } from './xlsx.js';
 import { JENIS_SERVIS, pakaiHm, pakaiKm } from './skema-alat.js';
 import { sebarHk, totalHkGrup } from './input-alat.js';
+import { rapikanKeterangan } from './teks.js';
 import {
   el, tabel, kosongkan, taruh, pesan, tanya, rupiah, angka, hk as fhk,
   tanggal as ftanggal,
@@ -61,7 +62,7 @@ export function tanggalDari(teks) {
   return null;
 }
 
-const rapi = (x) => String(x ?? '').trim();
+const rapi = rapikanKeterangan;
 
 /** "P05, P06a + P07a" → ['P05','P06a','P07a'] — pemisah: koma, titik koma, plus, garis miring, enter. */
 const pecahDaftar = (x) => rapi(x).split(/[,;+/\n]/).map((s) => s.trim()).filter(Boolean);

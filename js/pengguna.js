@@ -180,7 +180,7 @@ export function bolehHalaman(kunci) {
   // Halaman sistem: data terhapus, riwayat perubahan, pengaturan/token.
   // Riwayat memuat nama siapa menyimpan apa, dan Pengaturan memuat token —
   // dua-duanya urusan admin.
-  if (kunci === 'terhapus' || kunci === 'riwayat' || kunci === 'sistem') return false;
+  if (kunci === 'terhapus' || kunci === 'kualitas' || kunci === 'riwayat' || kunci === 'sistem') return false;
   if (kunci === 'kebun' || kunci === 'monitor') return bolehLaporan();
   if (kunci === 'beranda') return bolehSetuju() || bolehLaporan();
   if (kunci === 'persetujuan') return bolehSetuju() || bolehBatal();

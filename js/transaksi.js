@@ -7,6 +7,7 @@
 import * as D from './data.js';
 import * as P from './pengguna.js';
 import { TABEL } from './skema-payroll.js';
+import { rapikanKeterangan, cariKeteranganSerupa } from './teks.js';
 import {
   el, tabel, isian, pilihan, pilihanCari, kesalahan, panel, tanya, pesan, kosongkan, taruh,
   rupiah, rupiahPenuh, hk as fhk, tanggal as ftanggal, hariIni, angka,
@@ -37,7 +38,10 @@ const opsiMaster = (namaTabel, idSekarang = null) => {
 const opsiKomponen = (kategori, idSekarang = null) => {
   const opsi = D.aktif('wage_components')
     .filter((r) => r.kategori === kategori)
-    .map((r) => ({ nilai: r.id, label: `${r.nama_komponen} — ${rupiahPenuh(r.tarif)}${r.satuan ? '/' + r.satuan : ''}` }));
+    .map((r) => ({
+      nilai: r.id,
+      label: `${r.nama_komponen} — ${rupiahPenuh(r.tarif)}/${r.satuan || satuanBawaan(kategori)}`,
+    }));
   if (idSekarang && !opsi.some((o) => String(o.nilai) === String(idSekarang))) {
     opsi.unshift({ nilai: idSekarang, label: D.labelRef('wage_components', idSekarang) + ' (tidak aktif)' });
   }
@@ -54,6 +58,13 @@ const jenisDiKegiatan = (activityId) => D.aktif('job_types')
 
 const hidup = (t) => D.baris(t).filter((r) => !r.deleted_at);
 
+/** Satuan wajib untuk transaksi berbasis jumlah. Data lama yang kosong tetap
+ *  terbaca dengan bawaan aman, lalu tersimpan lengkap saat direvisi. */
+const satuanBawaan = (kategori) => (kategori === 'Lembur' ? 'jam' : 'satuan');
+const satuanTransaksi = (r, kategori) => String(
+  r?.satuan || D.cari('wage_components', r?.wage_component_id)?.satuan || satuanBawaan(kategori),
+).trim();
+
 /** Daftar saran untuk kolom keterangan: nilai yang SUDAH pernah dipakai, agar
  *  orang memilih ejaan yang sama alih-alih mengetik ulang (sumber typo
  *  "Pengawasan sore" vs "Pengawasan Sore"). Ejaan yang paling sering dipakai
@@ -62,44 +73,63 @@ function pasangSaran(kendali, ambilNilai) {
   const hitung = new Map();
   for (const t of ['daily_payroll', 'lembur_transactions', 'premi_transactions', 'borongan_transactions']) {
     for (const r of D.baris(t)) {
-      const v = String(ambilNilai(r) || '').trim();
+      const v = rapikanKeterangan(ambilNilai(r));
       if (!v) continue;
       hitung.set(v, (hitung.get(v) || 0) + 1);
     }
   }
   const urut = [...hitung.entries()].sort((a, b) => b[1] - a[1]).slice(0, 300);
-  if (!urut.length) return kendali;
+  if (!urut.length) {
+    kendali._rapikanEjaan = () => { kendali.value = rapikanKeterangan(kendali.value); };
+    return kendali;
+  }
   const id = `saran${Math.random().toString(36).slice(2, 9)}`;
   const dl = el('datalist', { id }, urut.map(([v]) => el('option', { value: v })));
   kendali.setAttribute('list', id);
   kendali._datalist = dl;   // disisipkan ke panel oleh isian()
 
-  // Perbaikan ejaan OTOMATIS: begitu selesai mengetik, kalau tulisannya sama
-  // dengan yang sudah pernah dipakai (beda huruf besar/kecil, spasi, atau
-  // tanda baca), ejaannya disamakan — supaya rekap tidak terpecah dua.
-  // Yang dipakai adalah ejaan yang paling sering muncul di data.
-  const rapat = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const utama = new Map();           // bentuk rapat -> ejaan terbanyak
-  for (const [v, n] of urut) {
-    const kk = rapat(v);
-    if (!kk) continue;
-    const ada = utama.get(kk);
-    if (!ada || n > ada.n) utama.set(kk, { v, n });
-  }
-  const catatan = el('small.bantuan', { teks: ' ' });
+  const daftar = urut.map(([nilai, jumlah]) => ({ nilai, jumlah }));
+  const catatan = el('div.saran-ejaan', { hidden: true });
   kendali._catatanEjaan = catatan;
-  kendali.addEventListener('blur', () => {
-    const diketik = kendali.value.trim();
-    if (!diketik) { catatan.textContent = ' '; return; }
-    const cocok = utama.get(rapat(diketik));
-    if (cocok && cocok.v !== diketik) {
-      kendali.value = cocok.v;
-      catatan.textContent = `Ejaan disamakan dengan yang sudah dipakai: "${cocok.v}".`;
-    } else {
-      catatan.textContent = ' ';
+  const periksa = () => {
+    kendali.value = rapikanKeterangan(kendali.value);
+    kosongkan(catatan);
+    catatan.hidden = true;
+    const cocok = cariKeteranganSerupa(kendali.value, daftar);
+    if (!cocok || cocok.nilai === kendali.value) return cocok;
+    if (cocok.jenis === 'sama') {
+      kendali.value = cocok.nilai;
+      catatan.hidden = false;
+      catatan.textContent = `Spasi/ejaan dirapikan menjadi "${cocok.nilai}".`;
+      return cocok;
     }
-  });
+    catatan.hidden = false;
+    catatan.append(
+      `Kemungkinan typo. Gunakan ejaan lama: `,
+      el('button.tombol-tautan', {
+        type: 'button', teks: cocok.nilai,
+        onclick: () => {
+          kendali.value = cocok.nilai;
+          catatan.textContent = `Dipakai: "${cocok.nilai}".`;
+        },
+      }),
+    );
+    return cocok;
+  };
+  kendali._rapikanEjaan = periksa;
+  kendali.addEventListener('blur', periksa);
   return kendali;
+}
+
+/** Pastikan typo yang sangat dekat tidak lolos diam-diam saat disimpan. */
+async function pastikanEjaan(kendali) {
+  const cocok = kendali?._rapikanEjaan?.();
+  if (!cocok || cocok.jenis !== 'mirip' || cocok.nilai === kendali.value) return;
+  const gunakan = await tanya('Keterangan hampir sama', el('div', {}, [
+    el('p', { teks: `Anda mengetik "${kendali.value}".` }),
+    el('p', { teks: `Data lama memakai "${cocok.nilai}". Gunakan ejaan lama agar laporan tidak membuat pekerjaan kembar?` }),
+  ]), { ya: 'Gunakan ejaan lama', tidak: 'Tetap tulisan baru' });
+  if (gunakan) kendali.value = cocok.nilai;
 }
 
 
@@ -130,6 +160,27 @@ function penguncianGalat(tgl) {
 
 function panelKosong(pesanTeks) {
   return el('div.petunjuk', {}, [pesanTeks]);
+}
+
+const BATAS_NOMINAL_RENDAH = 1000;
+
+/** Nilai positif di bawah Rp1.000 sering berasal dari satu nol yang tertinggal.
+ *  Tidak ditolak karena pecahan HK kecil tetap mungkin sah; pengguna hanya
+ *  diminta memastikan sebelum data benar-benar dibuat. */
+async function konfirmasiNominalRendah(daftar) {
+  const rendah = daftar.filter((x) => {
+    const nominal = Math.round(Number(x.nominal) || 0);
+    return nominal > 0 && nominal < BATAS_NOMINAL_RENDAH;
+  });
+  if (!rendah.length) return true;
+  return tanya('Nominal di bawah Rp1.000', el('div', {}, [
+    el('p', { teks: 'Periksa lagi—mungkin ada angka atau nol yang kurang:' }),
+    el('ul', {}, rendah.slice(0, 8).map((x) => el('li', {
+      teks: `${x.label}: ${rupiahPenuh(Math.round(Number(x.nominal) || 0))}`,
+    }))),
+    rendah.length > 8 ? el('p.bantuan', { teks: `…dan ${rendah.length - 8} baris lagi.` }) : null,
+    el('p', { teks: 'Tetap simpan jika nilai tersebut memang benar.' }),
+  ]), { ya: 'Tetap simpan', tidak: 'Periksa lagi' });
 }
 
 // =====================================================================
@@ -213,9 +264,10 @@ function bagianTambahan(kategori, satuanBawaan) {
         tarif_snapshot: tarif,
         nominal: Math.round(qty * tarif),
         catatan: '',
-        keterangan_manual: inKet.value.trim(),
+        keterangan_manual: rapikanKeterangan(inKet.value),
       };
     },
+    pastikanEjaan: () => pastikanEjaan(inKet),
   };
 }
 
@@ -657,6 +709,10 @@ function formHK(barisAda, tgl, saatSelesai) {
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); badan.scrollTop = 0; return; }
 
+    await pastikanEjaan(inJob);
+    if (bagianLembur?.aktif()) await bagianLembur.pastikanEjaan();
+    if (bagianPremi?.aktif()) await bagianPremi.pastikanEjaan();
+
     // Blok milik komoditas/divisi lain (mis. admin Infra atau Padi input ke
     // blok pisang): boleh, tapi harus disadari dulu karena biayanya nempel
     // ke divisi yang sedang dipilih, bukan ke divisi blok itu.
@@ -677,6 +733,11 @@ function formHK(barisAda, tgl, saatSelesai) {
         + 'akan tercatat Rp 0.' }),
       el('p', { teks: 'Isi dulu tarifnya di menu Karyawan, atau tetap simpan kalau memang begitu?' }),
     ]), { ya: 'Tetap simpan', tidak: 'Perbaiki dulu' })) return;
+    const nilaiRendah = [{ label: `Upah HK ${emp.nama}`, nominal: totalBaru * tarif }];
+    for (const [bagian, label] of [[bagianLembur, 'Lembur'], [bagianPremi, 'Premi']]) {
+      if (bagian?.aktif()) nilaiRendah.push({ label, nominal: bagian.isi({}).nominal });
+    }
+    if (!await konfirmasiNominalRendah(nilaiRendah)) return;
     const buatIsi = (r) => ({
       tanggal: tglNilai,
       employee_id: emp.id,
@@ -684,11 +745,11 @@ function formHK(barisAda, tgl, saatSelesai) {
       block_id: Number(r.block_id),
       activity_id: Number(r.activity_id),
       job_type_id: Number(r.job_type_id),
-      job: inJob.value.trim(),
+      job: rapikanKeterangan(inJob.value),
       hk: r.hk,
       tarif_hk_snapshot: Number(tarif),
       nominal: Math.round(r.hk * Number(tarif)),
-      catatan: inCatatan.value.trim(),
+      catatan: rapikanKeterangan(inCatatan.value),
     });
 
     let pertama = null;
@@ -1148,6 +1209,10 @@ function formMassal(tgl, saatSelesai) {
       el('ul', {}, tanpaTarif.slice(0, 8).map((e) => el('li', { teks: e.nama }))),
       tanpaTarif.length > 8 ? el('p.bantuan', { teks: `…dan ${tanpaTarif.length - 8} lagi.` }) : null,
     ]), { ya: 'Tetap simpan', tidak: 'Perbaiki dulu' })) return;
+    if (!await konfirmasiNominalRendah(dipilih.map((e) => ({
+      label: `Upah HK ${e.nama}`,
+      nominal: totalHk * (Number(e.tarif_hk) || 0),
+    })))) return;
     const { bagian: porsi } = D.bagiHkPerBlok(blok, totalHk, inBagi.value);
     let jumlahBaris = 0;
     for (const e of dipilih) {
@@ -1478,11 +1543,22 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
   // memang diketik per transaksi (sama seperti di aplikasi desktop).
   const inTarif = el('input', { type: 'number', step: '500', min: '0' });
   let tarifManual = false;
+  const inSatuan = el('input', {
+    type: 'text',
+    nilai: satuanTransaksi(barisAda, kategori),
+    placeholder: kategori === 'Lembur' ? 'jam' : 'kg, batang, rit, satuan, …',
+    autocomplete: 'off',
+  });
+  let satuanManual = Boolean(barisAda?.satuan);
   inTarif.addEventListener('input', () => { tarifManual = true; perbarui(); });
+  inSatuan.addEventListener('input', () => { satuanManual = true; perbarui(); });
   const inDivisi = pilihan(opsiMaster('divisions', barisAda?.division_id ?? awal.division_id),
     barisAda?.division_id ?? awal.division_id, { saatUbah: () => isiBlok() });
   const inBlok = pilihan([], barisAda?.block_id ?? awal.block_id);
-  const inCatatan = el('input', { type: 'text', nilai: barisAda?.catatan ?? '' });
+  const inCatatan = pasangSaran(
+    el('input', { type: 'text', nilai: barisAda?.catatan ?? '', autocomplete: 'off' }),
+    (r) => r.catatan || r.keterangan_manual,
+  );
 
   const isiBlok = () => {
     const lama = inBlok.value || String(barisAda?.block_id ?? awal.block_id ?? '');
@@ -1502,9 +1578,10 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
       const bawaan = Number(barisAda?.tarif_snapshot) || Number(kom?.tarif) || 0;
       inTarif.value = bawaan || '';
     }
+    if (!satuanManual) inSatuan.value = String(kom?.satuan || satuanBawaan(kategori)).trim();
     const tarif = Number(inTarif.value) || 0;
     const q = Number(inQty.value) || 0;
-    const satuan = kom?.satuan || (kategori === 'Lembur' ? 'jam' : 'satuan');
+    const satuan = inSatuan.value.trim() || satuanBawaan(kategori);
     hitungan.textContent = !kom
       ? 'Pilih komponen upah dulu.'
       : !tarif
@@ -1524,6 +1601,8 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
     if (!kom) salah.push('Komponen upah harus dipilih.');
     const q = Number(inQty.value);
     if (!(q > 0)) salah.push('Jumlah harus lebih dari 0.');
+    const satuanIsi = inSatuan.value.trim();
+    if (!satuanIsi) salah.push('Satuan harus diisi (mis. jam, kg, batang, atau rit).');
     const tarifIsi = Number(inTarif.value);
     if (!(tarifIsi > 0)) {
       salah.push(`Tarif harus diisi (lebih dari 0). Komponen "${kom?.nama_komponen || '—'}" `
@@ -1546,6 +1625,8 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); badan.scrollTop = 0; return; }
 
+    await pastikanEjaan(inCatatan);
+
     // Blok milik divisi/komoditas lain DULU ditolak keras di sini. Sekarang
     // hanya diperingatkan: divisi memang saling bantu (mis. Infra atau Padi
     // bantu di blok pisang), dan ada blok yang divisinya di master memang
@@ -1554,17 +1635,22 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
     if (!await tanyaKomoditas(inDivisi.value, [inBlok.value])) return;
 
     const tarif = tarifIsi;
+    const nominal = Math.round(q * tarif);
+    if (!await konfirmasiNominalRendah([{
+      label: `${kategori} ${emp.nama}`,
+      nominal,
+    }])) return;
     const isi = {
       tanggal: inTanggal.value,
       employee_id: emp.id,
       wage_component_id: kom.id,
       qty: q,
-      satuan: kom.satuan || '',
+      satuan: satuanIsi,
       tarif_snapshot: tarif,
-      nominal: Math.round(q * tarif),
+      nominal,
       division_id: inDivisi.value ? Number(inDivisi.value) : null,
       block_id: inBlok.value ? Number(inBlok.value) : null,
-      catatan: inCatatan.value.trim(),
+      catatan: rapikanKeterangan(inCatatan.value),
     };
     if (namaTabel === 'borongan_transactions') isi.activity_id = null;
     const perluAcc = namaTabel === 'lembur_transactions' || namaTabel === 'premi_transactions';
@@ -1595,13 +1681,20 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
     isian('Komponen upah *', inKomponen),
     el('div.baris-isian', {}, [
       isian('Jumlah *', inQty, { bantuan: 'Sesuai satuan komponen (jam, hari, kg, …).' }),
+      isian('Satuan *', inSatuan, {
+        bantuan: 'Terisi dari komponen upah, tetapi bisa disesuaikan untuk hasil kerja ini.',
+      }),
+    ]),
+    el('div.baris-isian', {}, [
       isian('Tarif per satuan (Rp) *', inTarif, {
         bantuan: 'Terisi otomatis kalau komponennya punya tarif tetap; untuk "Input Manual" diketik di sini.',
       }),
     ]),
     hitungan,
     pakaiBlok ? el('div.baris-isian', {}, [isian('Divisi *', inDivisi), isian('Blok *', inBlok)]) : null,
-    isian('Catatan', inCatatan),
+    isian('Hasil kerja / keterangan', inCatatan, {
+      bantuan: 'Tulis hasil yang mudah diaudit, mis. 120 lubang selesai atau pengawasan pompa.',
+    }),
   ]);
 
   const aksi = [];
@@ -1638,7 +1731,8 @@ function lembarTransaksi(namaTabel, kategori, prefix, periode, gambar, bisaEdit)
       { l: 'Pekerja', nilai: (r) => D.labelRef('employees', r.employee_id) },
       { l: 'Komponen', nilai: (r) => D.labelRef('wage_components', r.wage_component_id) },
       { l: 'Jumlah', k: 'qty', jenis: 'angka', pecahan: 2 },
-      { l: 'Satuan', k: 'satuan' },
+      { l: 'Satuan', nilai: (r) => satuanTransaksi(r, kategori) },
+      { l: 'Hasil kerja / keterangan', nilai: (r) => r.catatan || r.keterangan_manual || '–' },
       { l: 'Blok', nilai: (r) => (r.block_id ? D.labelBlokPada(r.block_id, r.tanggal) : '–') },
       { l: 'Upah (Rp)', k: 'nominal', jenis: 'uang', total: true },
     ], data, {

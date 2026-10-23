@@ -1,0 +1,8 @@
+{
+  "name": "vigufarm-payrol-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/teks.test.mjs tests/kualitas-data.test.mjs"
+  }
+}
