@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="../css/style.css">
+  <title>Uji UI Payroll</title>
+</head>
+<body><main class="isi" id="uji"></main>
+<script type="module">
+  import * as D from '../js/data.js';
+  import { TABEL, REF } from '../js/skema-payroll.js';
+  import { halamanHK } from '../js/transaksi.js';
+  D.state.aplikasi = 'PayrollHK';
+  D.state.data = {
+    aplikasi: 'PayrollHK',
+    web: { persetujuan: { lembur_transactions: {
+      10: { status: 'disetujui', oleh: 'Kepala Padi' },
+    } } },
+    tabel: {
+      employees: [{ id: 1, nama: 'SITI AMINAH', nik: 'K-001', aktif: 1, tarif_hk: 100000 }],
+      divisions: [{ id: 1, nama_divisi: 'Padi', aktif: 1 }],
+      blocks: [{ id: 1, division_id: 1, nama_blok: 'P01', aktif: 1 }],
+      activities: [{ id: 1, nama_kegiatan: 'PANEN', aktif: 1 }],
+      job_types: [{ id: 1, activity_id: 1, nama_jenis: 'Panen', aktif: 1 }],
+      wage_components: [{ id: 1, nama_komponen: 'Lembur manual', kategori: 'Lembur', satuan: 'jam', aktif: 1 }],
+      app_settings: [{ max_hk_per_hari: 1 }], payroll_lock: [],
+      daily_payroll: [{ id: 1, nomor_transaksi: 'HK-001', tanggal: '2026-10-26', employee_id: 1,
+        division_id: 1, block_id: 1, activity_id: 1, job_type_id: 1, hk: 1,
+        tarif_hk_snapshot: 100000, nominal: 100000, job: 'Panen', catatan: '' }],
+      lembur_transactions: [{ id: 10, nomor_transaksi: 'LM-001', tanggal: '2026-10-26', employee_id: 1,
+        division_id: 1, block_id: 1, wage_component_id: 1, qty: 2, satuan: 'jam',
+        tarif_snapshot: 20000, nominal: 40000, catatan: 'Menjaga pompa irigasi malam' }],
+      premi_transactions: [], borongan_transactions: [],
+    },
+  };
+  D.pakaiSkema(TABEL, REF);
+  const periode = { rentang: () => ['2026-10-01', '2026-10-31'], judul: () => 'Oktober 2026' };
+  document.querySelector('#uji').append(halamanHK({ periode, gambar: () => {}, bisaEdit: () => true }));
+  globalThis.fixtureReady = true;
+</script>
+</body></html>

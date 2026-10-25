@@ -11,6 +11,12 @@ export const kunciKeterangan = (nilai) => rapikanKeterangan(nilai)
   .replace(/[^a-z0-9]+/g, ' ')
   .trim();
 
+/** Angka adalah isi, bukan ejaan. Dua keterangan hanya boleh dianggap typo
+ * bila urutan angkanya persis sama (7x tidak boleh disarankan menjadi 8x,
+ * 0,17 ha tidak boleh menjadi 0,13 ha, dan 2 jam bukan 1 jam). */
+export const angkaKeterangan = (nilai) => (rapikanKeterangan(nilai).match(/\d+(?:[.,]\d+)?/g) || [])
+  .map((x) => x.replace(',', '.'));
+
 /** Jarak edit dengan batas kecil. Nilai di atas batas dikembalikan sebagai batas + 1. */
 export function jarakKeterangan(a, b, batas = 2) {
   const x = kunciKeterangan(a);
@@ -56,7 +62,11 @@ export function cariKeteranganSerupa(nilai, daftar) {
   const calon = urut
     .filter((x) => {
       const k = kunciKeterangan(x.nilai);
-      return k[0] === awal && k.split(' ').length === kata;
+      const angkaAsli = angkaKeterangan(bersih);
+      const angkaCalon = angkaKeterangan(x.nilai);
+      return k[0] === awal && k.split(' ').length === kata
+        && angkaAsli.length === angkaCalon.length
+        && angkaAsli.every((n, i) => n === angkaCalon[i]);
     })
     .map((x) => ({ ...x, jarak: jarakKeterangan(kunci, x.nilai, batas) }))
     .filter((x) => x.jarak <= batas)

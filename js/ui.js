@@ -124,6 +124,50 @@ export function tanya(judul, isi, { ya = 'Lanjutkan', tidak = 'Batal', bahaya = 
   });
 }
 
+/** Dialog isian singkat. Mengembalikan teks yang sudah dirapikan, atau null bila batal. */
+export function mintaTeks(judul, keterangan, {
+  label = 'Keterangan', ya = 'Simpan', tidak = 'Batal', wajib = false, panjang = 300,
+} = {}) {
+  return new Promise((selesai) => {
+    const inp = el('textarea', { rows: 3, maxlength: panjang, placeholder: label });
+    const galat = el('small.bantuan', { style: 'color:var(--merah);display:none',
+      teks: `${label} wajib diisi.` });
+    const tutup = (nilai) => {
+      latar.remove();
+      document.removeEventListener('keydown', tombol);
+      selesai(nilai);
+    };
+    const kirim = () => {
+      const nilai = inp.value.trim().replace(/\s+/g, ' ');
+      if (wajib && !nilai) {
+        galat.style.display = '';
+        inp.focus();
+        return;
+      }
+      tutup(nilai);
+    };
+    const tombol = (e) => {
+      if (e.key === 'Escape') tutup(null);
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) kirim();
+    };
+    const kotak = el('div.dialog', { role: 'dialog', 'aria-modal': 'true' }, [
+      el('h2', { teks: judul }),
+      typeof keterangan === 'string' ? el('p', { teks: keterangan }) : keterangan,
+      el('div.isian', {}, [el('label', { teks: label }), inp, galat]),
+      el('div.dialog-aksi', {}, [
+        el('button.tombol-samar', { type: 'button', onclick: () => tutup(null), teks: tidak }),
+        el('button.tombol-bahaya', { type: 'button', onclick: kirim, teks: ya }),
+      ]),
+    ]);
+    const latar = el('div.latar-dialog', {
+      onclick: (e) => { if (e.target === latar) tutup(null); },
+    }, [kotak]);
+    document.body.append(latar);
+    document.addEventListener('keydown', tombol);
+    inp.focus();
+  });
+}
+
 /** Panel geser dari kanan untuk form tambah/ubah. */
 export function panel(judul, isi, aksi = []) {
   const tutup = () => { latar.remove(); document.removeEventListener('keydown', tombol); };
@@ -218,6 +262,7 @@ export function isian(label, kendali, { bantuan = null, lebar = null } = {}) {
     el('label', { for: id, teks: label }),
     kendali,
     kendali._datalist || null,   // daftar saran (kalau kendali punya)
+    kendali._pilihanSaran || null, // tombol input lama yang bisa langsung dipilih
     kendali._catatanEjaan || null,   // catatan "ejaan disamakan"
 
     bantuan ? el('small.bantuan', { teks: bantuan }) : null,
@@ -236,6 +281,37 @@ export function pilihan(opsi, nilai, { kosongLabel = '— pilih —', saatUbah =
     s.append(op);
   }
   return s;
+}
+
+/** Tambahkan tombol pilihan cepat di bawah select / pilihanCari.
+ *  Dipakai untuk entri yang berulang agar pengguna tidak perlu membuka dan
+ *  mencari daftar panjang setiap kali. */
+export function pasangPilihanCepat(kendali, daftar, {
+  judul = 'Terakhir & sering dipakai', saatPilih = null,
+} = {}) {
+  if (!daftar?.length) return kendali;
+  const tombol = daftar.map((item) => el('button.pilihan-cepat-tombol', {
+    type: 'button',
+    title: item.keterangan || item.label,
+    onclick: () => {
+      if (saatPilih) saatPilih(item.nilai, item);
+      else if (typeof kendali.setNilai === 'function') kendali.setNilai(item.nilai);
+      else {
+        kendali.value = String(item.nilai ?? '');
+        kendali.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      for (const b of tombol) b.classList.toggle('aktif', b === tombol.find((x) => x.dataset.nilai === String(item.nilai)));
+    },
+  }, [
+    el('strong', { teks: item.label }),
+    item.keterangan ? el('small', { teks: item.keterangan }) : null,
+  ]));
+  tombol.forEach((b, i) => { b.dataset.nilai = String(daftar[i].nilai); });
+  kendali._pilihanSaran = el('div.pilihan-cepat', {}, [
+    el('span.pilihan-cepat-label', { teks: judul }),
+    el('div.pilihan-cepat-daftar', {}, tombol),
+  ]);
+  return kendali;
 }
 
 /** Kotak isian dengan daftar saran (datalist) — untuk memilih dari ribuan baris. */

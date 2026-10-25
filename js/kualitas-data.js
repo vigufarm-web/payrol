@@ -1,6 +1,8 @@
 // kualitas-data.js — pemeriksaan data murni, tanpa DOM dan tanpa perubahan otomatis.
 
-import { rapikanKeterangan, kunciKeterangan, cariKeteranganSerupa } from './teks.js';
+import {
+  rapikanKeterangan, kunciKeterangan, cariKeteranganSerupa, jarakKeterangan, angkaKeterangan,
+} from './teks.js';
 
 const hidup = (data, tabel) => (data?.tabel?.[tabel] || []).filter((r) => !r.deleted_at);
 const angka = (v) => Number(v) || 0;
@@ -20,6 +22,61 @@ const REF_ALAT = {
   service_logs: { unit_id: 'units' },
 };
 
+const labelMaster = (data, tabel, id) => {
+  const r = hidup(data, tabel).find((x) => Number(x.id) === Number(id));
+  return r?.nama_blok || r?.nama_divisi || r?.nama || `#${id}`;
+};
+
+/** Saran referensi lama berdasarkan HK orang pada tanggal yang sama.
+ * Hanya mengusulkan bila hasilnya tunggal; keputusan tetap di pengguna. */
+function saranReferensiPayroll(data, tabel, r, kolom) {
+  if (!['lembur_transactions', 'premi_transactions', 'borongan_transactions'].includes(tabel)) return null;
+  if (!['division_id', 'block_id'].includes(kolom)) return null;
+  let acuan = hidup(data, 'daily_payroll').filter((x) => x.tanggal === r.tanggal
+    && Number(x.employee_id) === Number(r.employee_id));
+  if (kolom === 'block_id' && r.division_id != null) {
+    acuan = acuan.filter((x) => Number(x.division_id) === Number(r.division_id));
+  }
+  const nilai = [...new Set(acuan.map((x) => Number(x[kolom])).filter(Boolean))];
+  if (nilai.length !== 1) return null;
+  const master = kolom === 'block_id' ? 'blocks' : 'divisions';
+  return { nilai: nilai[0], master, label: labelMaster(data, master, nilai[0]) };
+}
+
+/** Meter antartanggal. Baris bertanda meter_reset memulai rangkaian baru. */
+export function masalahMeterBerurutan(data) {
+  const hasil = [];
+  const perUnit = new Map();
+  for (const r of hidup(data, 'work_logs')) {
+    if (!perUnit.has(Number(r.unit_id))) perUnit.set(Number(r.unit_id), []);
+    perUnit.get(Number(r.unit_id)).push(r);
+  }
+  for (const [unitId, daftar] of perUnit) {
+    daftar.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)) || Number(a.id) - Number(b.id));
+    for (const [kolom, label] of [['hm_akhir', 'HM'], ['km_akhir', 'KM']]) {
+      const perHari = new Map();
+      for (const r of daftar) {
+        const nilai = angka(r[kolom]);
+        if (!(nilai > 0)) continue;
+        const lama = perHari.get(r.tanggal);
+        if (r.meter_reset || !lama || nilai >= lama.nilai) perHari.set(r.tanggal, {
+          nilai, id: r.id, reset: Boolean(r.meter_reset), alasan: r.meter_reset_alasan || '',
+        });
+      }
+      let acuan = null;
+      for (const [tanggal, kini] of [...perHari].sort((a, b) => a[0].localeCompare(b[0]))) {
+        if (kini.reset) { acuan = { ...kini, tanggal }; continue; }
+        if (acuan && kini.nilai < acuan.nilai - 1e-9) {
+          hasil.push({ unitId, label, kolom, id: kini.id, tanggal, nilai: kini.nilai,
+            tanggalSebelum: acuan.tanggal, nilaiSebelum: acuan.nilai });
+        }
+        acuan = { ...kini, tanggal };
+      }
+    }
+  }
+  return hasil;
+}
+
 function pemeriksa(data, sekarang) {
   const masalah = [];
   let urut = 0;
@@ -38,13 +95,45 @@ function pemeriksa(data, sekarang) {
     for (const r of hidup(data, tabel)) {
       for (const [k, master] of Object.entries(kolom)) {
         if (r[k] == null || r[k] === '') {
+          const saran = data?.aplikasi === 'AlatBerat' ? null : saranReferensiPayroll(data, tabel, r, k);
           tambah({ tingkat: 'galat', jenis: 'Referensi kosong', tabel, id: r.id,
-            detail: `${k} belum diisi pada baris ${r.nomor_transaksi || r.id}.` });
+            detail: `${k} belum diisi pada baris ${r.nomor_transaksi || r.id}.`
+              + (saran ? ` HK orang dan tanggal yang sama menunjuk ${saran.label}.` : ''),
+            ...(saran ? {
+              perbaikan: [{ tabel, id: r.id, tambalan: { [k]: saran.nilai } }],
+              labelPerbaikan: `Isi ${saran.label}`,
+            } : {}),
+          });
           continue;
         }
         if (!hidup(data, master).some((m) => Number(m.id) === Number(r[k]))) {
           tambah({ tingkat: 'galat', jenis: 'Referensi tidak ditemukan', tabel, id: r.id,
             detail: `${k} menunjuk ${master} #${r[k]} yang tidak ada/aktif.` });
+        }
+      }
+    }
+  }
+
+  // Nama master yang nyaris sama membuat admin salah memilih dan laporan
+  // terpecah. Hanya diperingatkan—penggabungan master harus diputuskan admin.
+  if (data?.aplikasi !== 'AlatBerat') {
+    for (const [tabel, kolom, label] of [
+      ['activities', 'nama_kegiatan', 'Kegiatan'],
+      ['job_types', 'nama_jenis', 'Jenis pekerjaan'],
+      ['wage_components', 'nama_komponen', 'Komponen upah'],
+    ]) {
+      const daftar = hidup(data, tabel).map((r) => ({ id: r.id, nilai: rapikanKeterangan(r[kolom]) }))
+        .filter((x) => x.nilai);
+      for (let i = 0; i < daftar.length; i++) {
+        for (let j = i + 1; j < daftar.length; j++) {
+          const a = daftar[i]; const b = daftar[j];
+          if (kunciKeterangan(a.nilai)[0] !== kunciKeterangan(b.nilai)[0]) continue;
+          const aa = angkaKeterangan(a.nilai); const ab = angkaKeterangan(b.nilai);
+          if (aa.length !== ab.length || !aa.every((n, k) => n === ab[k])) continue;
+          const batas = Math.max(kunciKeterangan(a.nilai).length, kunciKeterangan(b.nilai).length) >= 12 ? 2 : 1;
+          if (jarakKeterangan(a.nilai, b.nilai, batas) > batas) continue;
+          tambah({ tingkat: 'peringatan', jenis: 'Master hampir kembar', tabel, id: a.id,
+            detail: `${label} “${a.nilai}” sangat mirip dengan “${b.nilai}”. Periksa apakah salah satunya typo sebelum menambah data baru.` });
         }
       }
     }
@@ -166,6 +255,35 @@ function pemeriksa(data, sekarang) {
     for (const r of hidup(data, 'fuel_logs')) {
       if (!(angka(r.liter) > 0) || !(angka(r.harga_liter) > 0)) tambah({ tingkat: 'galat', jenis: 'Data solar tidak lengkap', tabel: 'fuel_logs', id: r.id,
         detail: `Pengisian solar #${r.id} harus memiliki liter dan harga per liter.` });
+    }
+    for (const m of masalahMeterBerurutan(data)) {
+      tambah({ tingkat: 'galat', jenis: 'Meter tidak urut antartanggal', tabel: 'work_logs', id: m.id,
+        tanggal: m.tanggal,
+        detail: `${labelMaster(data, 'units', m.unitId)}: ${m.label} ${m.nilai} pada ${m.tanggal} `
+          + `lebih kecil dari ${m.nilaiSebelum} pada ${m.tanggalSebelum}. `
+          + 'Periksa angka/tanggal atau tandai penggantian meter.' });
+    }
+
+    // Satu pengisian bisa dipakai beberapa hari, jadi kelengkapan dinilai
+    // per unit per bulan, bukan dipaksa ada solar setiap hari.
+    const operasi = new Map();
+    const solar = new Map();
+    for (const r of hidup(data, 'work_logs')) {
+      const dipakai = Math.max(0, angka(r.hm_akhir) - angka(r.hm_awal))
+        + Math.max(0, angka(r.km_akhir) - angka(r.km_awal));
+      if (!(dipakai > 0)) continue;
+      const k = `${r.unit_id}|${String(r.tanggal).slice(0, 7)}`;
+      const x = operasi.get(k) || { unitId: r.unit_id, bulan: String(r.tanggal).slice(0, 7), id: r.id, n: 0 };
+      x.n++; operasi.set(k, x);
+    }
+    for (const r of hidup(data, 'fuel_logs')) {
+      const k = `${r.unit_id}|${String(r.tanggal).slice(0, 7)}`;
+      solar.set(k, (solar.get(k) || 0) + angka(r.liter));
+    }
+    for (const [k, x] of operasi) if (!(solar.get(k) > 0)) {
+      tambah({ tingkat: 'peringatan', jenis: 'Operasi tanpa catatan solar', tabel: 'work_logs', id: x.id,
+        detail: `${labelMaster(data, 'units', x.unitId)} memiliki ${x.n} log operasi pada ${x.bulan}, `
+          + 'tetapi tidak ada liter solar tercatat pada bulan itu.' });
     }
   }
 
