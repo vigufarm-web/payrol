@@ -22,9 +22,8 @@ const biayaSolar = (r) => (Number(r.liter) || 0) * (Number(r.harga_liter) || 0);
 function dataPeriode(periode) {
   const saring = dalamPeriode(periode);
   return {
-    // log yang masih menunggu acc kepala divisi TIDAK ikut dihitung
-    log: D.baris('work_logs').filter((r) => saring(r) && !r.deleted_at
-      && D.disetujui('work_logs', r.id)),
+    // HK dan operasi selalu dihitung; status acc hanya mengatur premi/upah jam.
+    log: D.baris('work_logs').filter((r) => saring(r) && !r.deleted_at),
     solar: D.baris('fuel_logs').filter(saring),
     servis: D.baris('service_logs').filter(saring),
   };
@@ -47,7 +46,7 @@ function acuanSemuaPeriode() {
     return per.get(k);
   };
   for (const r of D.baris('work_logs')) {
-    if (r.deleted_at || !D.disetujui('work_logs', r.id)) continue;
+    if (r.deleted_at) continue;
     const b = ambil(r.unit_id);
     b.hm += hmPakai(r); b.km += kmPakai(r); b.hari.add(r.tanggal);
   }
@@ -87,7 +86,7 @@ function isiRingkasanUnit(periode, gambarUlang) {
   // "semua periode" = tanpa saringan tanggal sama sekali
   const { log, solar, servis } = semuaPeriode
     ? {
-      log: D.baris('work_logs').filter((r) => !r.deleted_at && D.disetujui('work_logs', r.id)),
+      log: D.baris('work_logs').filter((r) => !r.deleted_at),
       solar: D.baris('fuel_logs').filter((r) => !r.deleted_at),
       servis: D.baris('service_logs').filter((r) => !r.deleted_at),
     }
@@ -246,11 +245,12 @@ export function halamanPayrollOperator({ periode }) {
       });
     }
     const b = per.get(k);
+    const tambahanSah = D.disetujui('work_logs', r.id);
     b.hari.add(r.tanggal);
     b.hk += Number(r.hk) || 0;
-    b.jam_hm += hmPakai(r);
+    if (tambahanSah) b.jam_hm += hmPakai(r);
     b.km += kmPakai(r);
-    b.premi += Number(r.premi) || 0;
+    if (tambahanSah) b.premi += Number(r.premi) || 0;
   }
 
   const data = [...per.values()].map((b) => {
@@ -347,9 +347,10 @@ export function halamanBiayaLokasi({ periode }) {
     b.hk += hk;
     b.hm += hmPakai(r);
     b.km += kmPakai(r);
-    b.tenaga += hk * (Number(o?.tarif_harian) || 0)
-      + hmPakai(r) * (Number(o?.tarif_jam) || 0)
-      + (Number(r.premi) || 0);
+    b.tenaga += hk * (Number(o?.tarif_harian) || 0);
+    if (D.disetujui('work_logs', r.id)) {
+      b.tenaga += hmPakai(r) * (Number(o?.tarif_jam) || 0) + (Number(r.premi) || 0);
+    }
   }
 
   // solar & servis dibagi sebanding HM (atau KM) unit itu di tiap lokasi

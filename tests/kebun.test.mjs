@@ -1,0 +1,67 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+const simpanan = new Map();
+globalThis.localStorage = {
+  getItem: (k) => simpanan.get(k) ?? null,
+  setItem: (k, v) => simpanan.set(k, String(v)),
+};
+const { rekomendasiAnggaran } = await import('../js/kebun.js');
+const D = await import('../js/data.js');
+const { nilaiPersetujuanAlat } = await import('../js/input-alat.js');
+
+test('rekomendasi berhenti pada tanggal input terakhir, bukan tanggal hari ini', () => {
+  const k = rekomendasiAnggaran(
+    { total: 4_000_000, totalHk: 40, upahHk: 4_000_000 },
+    8_000_000, '2026-10-16', '2026-10-31', '2026-10-23');
+  assert.equal(k.hariJalan, 8);
+  assert.equal(k.hariSisa, 8);
+  assert.equal(k.rpPerHari, 500_000);
+  assert.equal(k.proyeksi, 8_000_000);
+  assert.equal(k.tanggalAcuan, '2026-10-23');
+});
+
+test('tanpa input terakhir rekomendasi tidak mengarang hari berjalan', () => {
+  const k = rekomendasiAnggaran(
+    { total: 0, totalHk: 0, upahHk: 0 }, 8_000_000,
+    '2026-10-16', '2026-10-31', null);
+  assert.equal(k.hariJalan, 0);
+  assert.equal(k.belumMulai, true);
+});
+
+test('persetujuan Infra hanya menghitung upah jam dan premi, bukan HK', () => {
+  D.state.data = {
+    aplikasi: 'AlatBerat', web: { persetujuan: {} },
+    tabel: {
+      operators: [{ id: 1, tarif_harian: 100_000, tarif_jam: 20_000 }],
+      work_logs: [{ id: 7, operator_id: 1, hk: 1, hm_awal: 10, hm_akhir: 12, premi: 15_000 }],
+    },
+  };
+  const nilai = nilaiPersetujuanAlat(D.state.data.tabel.work_logs[0]);
+  assert.equal(nilai.upahJam, 40_000);
+  assert.equal(nilai.premi, 15_000);
+  assert.equal(nilai.total, 55_000);
+  assert.equal('upahHk' in nilai, false);
+});
+
+test('menolak tambahan Infra tidak menghapus HK atau log operasinya', () => {
+  D.state.data = {
+    aplikasi: 'AlatBerat', web: { persetujuan: {} },
+    tabel: { work_logs: [{ id: 9, hk: 1, hm_awal: 20, hm_akhir: 21, premi: 10_000 }] },
+  };
+  D.tolak('work_logs', 9, 'Kepala Infra', 'Premi tidak sesuai');
+  assert.equal(D.cari('work_logs', 9).deleted_at, undefined);
+  assert.equal(D.cari('work_logs', 9).hk, 1);
+  assert.equal(D.catatanPersetujuan('work_logs', 9).status, 'ditolak');
+});
+
+test('revisi lembur selalu menggugurkan persetujuan lama', () => {
+  D.state.data = {
+    aplikasi: 'PayrollHK',
+    web: { persetujuan: { lembur_transactions: { 3: { status: 'disetujui', oleh: 'Kepala' } } } },
+    tabel: { lembur_transactions: [{ id: 3, nominal: 50_000, catatan: 'Awal' }] },
+  };
+  D.ubah('lembur_transactions', 3, { catatan: 'Keterangan direvisi' });
+  assert.equal(D.catatanPersetujuan('lembur_transactions', 3).status, 'menunggu');
+  assert.equal(D.cari('lembur_transactions', 3).catatan, 'Keterangan direvisi');
+});

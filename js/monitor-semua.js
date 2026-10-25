@@ -8,8 +8,8 @@
 //
 // Aturan angkanya sama persis dengan laporan masing-masing bagian:
 //   • Lembur & premi hanya dihitung kalau SUDAH di-acc kepala divisi.
-//   • Log alat berat hanya dihitung kalau SUDAH di-acc.
-//   • Upah operator = (HK x tarif harian) + (jam HM x tarif per jam) + premi.
+//   • HK dan operasi alat langsung dihitung; upah jam/lembur & premi menunggu acc.
+//   • Upah operator = (HK x tarif harian) + tambahan yang sudah disetujui.
 
 import * as D from './data.js';
 import {
@@ -157,16 +157,20 @@ function hitungAlat(data, dari, sampai) {
   for (const r of barisDi(data, 'work_logs')) {
     if (r.deleted_at || r.tanggal < dari || r.tanggal > sampai) continue;
     const b = ambil(r.unit_id);
-    if (menungguDi(data, 'work_logs', r.id)) { b.tunggu += 1; continue; }
-    if (!accDi(data, 'work_logs', r.id)) continue;
+    const tambahanSah = accDi(data, 'work_logs', r.id);
     const o = op.get(Number(r.operator_id));
+    const nilaiTambahan = hmPakai(r) * nol(o?.tarif_jam) + nol(r.premi);
+    if (menungguDi(data, 'work_logs', r.id) && nilaiTambahan > 0) b.tunggu += 1;
     b.hari.add(r.tanggal);
     b.hm += hmPakai(r);
     b.km += kmPakai(r);
     b.ritase += nol(r.ritase);
     b.hkOp += nol(r.hk);
-    b.upah += nol(r.hk) * nol(o?.tarif_harian) + hmPakai(r) * nol(o?.tarif_jam);
-    b.premi += nol(r.premi);
+    b.upah += nol(r.hk) * nol(o?.tarif_harian);
+    if (tambahanSah) {
+      b.upah += hmPakai(r) * nol(o?.tarif_jam);
+      b.premi += nol(r.premi);
+    }
   }
   for (const r of barisDi(data, 'fuel_logs')) {
     if (!dalam(r)) continue;
@@ -283,7 +287,8 @@ function mentahAlat(data, dari, sampai) {
       kategori: unit.get(Number(r.unit_id))?.kategori || '',
       operator: o?.nama || '', hk: nol(r.hk),
       hm: hmPakai(r), km: kmPakai(r), ritase: nol(r.ritase), liter: 0,
-      biaya: nol(r.hk) * nol(o?.tarif_harian) + hmPakai(r) * nol(o?.tarif_jam) + nol(r.premi),
+      biaya: nol(r.hk) * nol(o?.tarif_harian) + (accDi(data, 'work_logs', r.id)
+        ? hmPakai(r) * nol(o?.tarif_jam) + nol(r.premi) : 0),
       keterangan: r.keterangan || r.catatan || '',
       acc: STATUS_BARIS(data, 'work_logs', r),
     });
@@ -647,7 +652,7 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
               ], statusData, { kosong: 'Tidak ada bagian terbaca.' }),
               (tungguOperasional || tungguAlat)
                 ? el('p.bantuan', {
-                  teks: `Menunggu acc: ${tungguOperasional} lembur/premi dan ${tungguAlat} log alat.`,
+                  teks: `Menunggu acc: ${tungguOperasional} lembur/premi payroll dan ${tungguAlat} tambahan Infra.`,
                 })
                 : el('p.bantuan', { teks: 'Tidak ada transaksi yang menunggu persetujuan.' }),
             ]),

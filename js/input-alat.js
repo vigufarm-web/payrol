@@ -9,13 +9,15 @@
 import * as D from './data.js';
 import { TABEL, JENIS_SERVIS, pakaiHm, pakaiKm } from './skema-alat.js';
 import {
-  el, tabel, isian, pilihan, pilihanCari, kesalahan, panel, tanya, pesan, kosongkan, taruh,
+  el, tabel, isian, pilihan, pilihanCari, pasangPilihanCepat, kesalahan, panel, tanya, mintaTeks, pesan, kosongkan, taruh,
   rupiah, rupiahPenuh, angka, hk as fhk, tanggal as ftanggal, hariIni,
 } from './ui.js';
 import {
   mintaPin, periksaPinAdmin, adminPinTerpasang, rentangPeriode,
   rekomendasiAnggaran, kotakRekomendasi, jedaInput,
 } from './kebun.js';
+import { pasangSaranRiwayat, pastikanSaran } from './saran-input.js';
+import { masalahMeterBerurutan } from './kualitas-data.js';
 
 const opsiUnit = (idSekarang = null) => {
   const o = D.aktif('units').map((r) => ({ nilai: r.id, label: TABEL.units.label(r) }));
@@ -42,6 +44,28 @@ const kmPakai = (r) => Math.max(0, (Number(r.km_akhir) || 0) - (Number(r.km_awal
 
 /** Daftar lokasi yang pernah dipakai, untuk saran pengisian. */
 const daftarLokasi = () => [...new Set(D.baris('work_logs').map((r) => r.lokasi).filter(Boolean))].sort();
+
+/** Pilihan unit/operator yang paling baru dan paling sering dipakai. */
+function referensiSering(tabelNama, kolom, opsi, batas = 7) {
+  const statistik = new Map();
+  for (const nama of (Array.isArray(tabelNama) ? tabelNama : [tabelNama])) {
+    for (const r of D.baris(nama).filter((x) => !x.deleted_at)) {
+      const id = String(r[kolom] ?? '');
+      if (!id) continue;
+      const s = statistik.get(id) || { jumlah: 0, terakhir: '' };
+      s.jumlah += 1;
+      if (String(r.tanggal || '') > s.terakhir) s.terakhir = String(r.tanggal || '');
+      statistik.set(id, s);
+    }
+  }
+  return opsi.map((o) => ({ ...o, statistik: statistik.get(String(o.nilai)) }))
+    .filter((o) => o.statistik)
+    .sort((a, b) => b.statistik.terakhir.localeCompare(a.statistik.terakhir)
+      || b.statistik.jumlah - a.statistik.jumlah
+      || a.label.localeCompare(b.label, 'id'))
+    .slice(0, batas)
+    .map((o) => ({ nilai: o.nilai, label: o.label, keterangan: `${o.statistik.jumlah}× dipakai` }));
+}
 
 /** Tarif premi per unit: Rp per HM, per KM, dan per ritase (diatur admin).
  *  Dasar hitungan mengikuti mana yang diisi — mis. dump truck bisa pakai
@@ -78,10 +102,13 @@ function meterTerakhir(unitId, kecualiId = null) {
  * mundur, jadi acuannya selalu angka tertinggi sebelum hari itu.
  */
 function meterSebelum(unitId, tanggal, kecualiId = null) {
-  const log = D.baris('work_logs').filter((r) => !r.deleted_at
+  const semua = D.baris('work_logs').filter((r) => !r.deleted_at
     && Number(r.unit_id) === Number(unitId)
     && Number(r.id) !== Number(kecualiId)
-    && String(r.tanggal) <= String(tanggal));
+    && String(r.tanggal) <= String(tanggal))
+    .sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)) || Number(a.id) - Number(b.id));
+  const batas = semua.findLastIndex((r) => r.meter_reset);
+  const log = batas >= 0 ? semua.slice(batas) : semua;
   const maks = (k) => log.reduce((n, r) => Math.max(n, Number(r[k]) || 0), 0);
   return { hm: maks('hm_akhir'), km: maks('km_akhir'), ada: log.length > 0 };
 }
@@ -92,38 +119,7 @@ function meterSebelum(unitId, tanggal, kecualiId = null) {
  * entah meternya), jadi ditampilkan sebagai peringatan di halaman log.
  */
 function meterMundur() {
-  const perUnit = new Map();
-  for (const r of D.baris('work_logs')) {
-    if (r.deleted_at) continue;
-    if (!perUnit.has(r.unit_id)) perUnit.set(r.unit_id, []);
-    perUnit.get(r.unit_id).push(r);
-  }
-  const masalah = [];
-  for (const [unitId, log] of perUnit) {
-    const unit = D.cari('units', unitId);
-    log.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)) || Number(a.id) - Number(b.id));
-    // dibandingkan PER HARI (pembacaan tertinggi hari itu vs hari
-    // sebelumnya) — beberapa log di hari yang sama tidak bikin salah tangkap,
-    // dan satu salah ketik hanya menghasilkan satu-dua peringatan
-    for (const [k, label, pakai] of [['hm_akhir', 'HM', pakaiHm], ['km_akhir', 'KM', pakaiKm]]) {
-      if (!pakai(unit)) continue;
-      const perHari = new Map();
-      for (const r of log) {
-        const nilai = Number(r[k]) || 0;
-        if (nilai > 0) perHari.set(r.tanggal, Math.max(perHari.get(r.tanggal) || 0, nilai));
-      }
-      let acuan = null;
-      for (const [tanggal, nilai] of [...perHari.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-        if (acuan && nilai < acuan.nilai - 1e-9) {
-          masalah.push(`${D.labelRef('units', unitId)}: ${label} ${angka(nilai, 1)} pada `
-            + `${ftanggal(tanggal)} lebih kecil dari ${angka(acuan.nilai, 1)} pada `
-            + `${ftanggal(acuan.tanggal)} — meter tidak mungkin mundur, periksa tanggal atau angkanya`);
-        }
-        acuan = { nilai, tanggal };
-      }
-    }
-  }
-  return masalah;
+  return masalahMeterBerurutan(D.state.data);
 }
 
 /**
@@ -166,6 +162,15 @@ function formLog(barisAda, tglAwal, saatSelesai) {
   const inUnit = pilihan(opsiUnit(barisAda?.unit_id), barisAda?.unit_id, { saatUbah: () => aturMeter() });
   const inOperator = pilihanCari(opsiOperator(barisAda?.operator_id), barisAda?.operator_id,
     { tempat: 'Ketik nama operator…', saatUbah: () => aturTotalHk() });
+  if (!barisAda) {
+    pasangPilihanCepat(inUnit, referensiSering('work_logs', 'unit_id', opsiUnit()), {
+      judul: 'Unit terakhir & sering dipakai',
+    });
+    pasangPilihanCepat(inOperator, referensiSering('work_logs', 'operator_id', opsiOperator()), {
+      judul: 'Operator terakhir & sering dipakai',
+      saatPilih: (id) => { inOperator.setNilai(id); aturTotalHk(); },
+    });
+  }
 
   const inHmAwal = el('input', { type: 'number', step: '0.1', min: '0', nilai: barisAda?.hm_awal ?? '' });
   const inHmAkhir = el('input', { type: 'number', step: '0.1', min: '0', nilai: barisAda?.hm_akhir ?? '' });
@@ -173,10 +178,26 @@ function formLog(barisAda, tglAwal, saatSelesai) {
   const inKmAkhir = el('input', { type: 'number', step: '0.1', min: '0', nilai: barisAda?.km_akhir ?? '' });
   const inRitase = el('input', { type: 'number', step: '1', min: '0', nilai: barisAda?.ritase ?? 0 });
   const inTotalHk = el('input', { type: 'number', step: '0.05', min: '0', max: '1', nilai: 1 });
-  const inKegiatan = el('input', { type: 'text', nilai: barisAda?.kegiatan ?? '' });
+  const riwayatLog = D.baris('work_logs').filter((r) => !r.deleted_at);
+  const inKegiatan = pasangSaranRiwayat(
+    el('input', { type: 'text', nilai: barisAda?.kegiatan ?? '', autocomplete: 'off' }),
+    riwayatLog.map((r) => ({ nilai: r.kegiatan, tanggal: r.tanggal })),
+  );
   const inLokasi = pilihanCari(daftarLokasi().map((l) => ({ nilai: l, label: l })), null,
     { tempat: 'mis. Blok A01' });
   const inPremi = el('input', { type: 'number', step: '1000', min: '0', nilai: barisAda?.premi ?? 0 });
+  const inResetMeter = el('input', { type: 'checkbox' });
+  inResetMeter.checked = Boolean(barisAda?.meter_reset);
+  const inAlasanReset = el('input', {
+    type: 'text', nilai: barisAda?.meter_reset_alasan || '',
+    placeholder: 'mis. hour meter diganti setelah servis', autocomplete: 'off',
+  });
+  const bungkusAlasanReset = isian('Alasan penggantian/reset *', inAlasanReset);
+  const aturReset = () => {
+    bungkusAlasanReset.style.display = inResetMeter.checked ? '' : 'none';
+    if (!inResetMeter.checked) isiAwalOtomatis();
+    perbaruiCatatan();
+  };
   let premiManual = barisAda != null;   // baris lama: angka tersimpan jangan ditimpa
   inPremi.addEventListener('input', () => { premiManual = true; });
   const catatanPremi = el('p.bantuan', { teks: ' ' });
@@ -200,7 +221,10 @@ function formLog(barisAda, tglAwal, saatSelesai) {
       : 'Isi meter/ritasenya dulu — premi dihitung dari situ.';
     if (!premiManual) inPremi.value = nilai;
   };
-  const inCatatan = el('input', { type: 'text', nilai: barisAda?.catatan ?? '' });
+  const inCatatan = pasangSaranRiwayat(
+    el('input', { type: 'text', nilai: barisAda?.catatan ?? '', autocomplete: 'off' }),
+    riwayatLog.map((r) => ({ nilai: r.catatan, tanggal: r.tanggal })),
+  );
   if (barisAda?.lokasi) inLokasi.setNilai(barisAda.lokasi);
 
   const barisHm = el('div.baris-isian', {}, [isian('HM awal', inHmAwal), isian('HM akhir', inHmAkhir)]);
@@ -215,7 +239,7 @@ function formLog(barisAda, tglAwal, saatSelesai) {
   // Admin tinggal mengisi angka meter SAAT INI (kolom akhir); angka itu
   // otomatis jadi "awal" untuk log hari berikutnya.
   const isiAwalOtomatis = () => {
-    if (barisAda) return;   // baris lama dibiarkan seperti tersimpan
+    if (barisAda || inResetMeter.checked) return;   // reset memulai rangkaian baru
     const unit = D.cari('units', inUnit.value);
     if (!unit) return;
     const m = meterSebelum(unit.id, inTanggal.value);
@@ -290,6 +314,9 @@ function formLog(barisAda, tglAwal, saatSelesai) {
     if (!inTanggal.value) salah.push('Tanggal harus diisi.');
     if (!unit) salah.push('Unit harus dipilih.');
     if (!opId) salah.push('Operator belum dipilih (ketik nama lalu pilih dari daftar).');
+    if (inResetMeter.checked && !inAlasanReset.value.trim()) {
+      salah.push('Alasan penggantian/reset meter harus diisi.');
+    }
 
     const hmA = Number(inHmAwal.value) || 0;
     const hmB = Number(inHmAkhir.value) || 0;
@@ -307,13 +334,23 @@ function formLog(barisAda, tglAwal, saatSelesai) {
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); badan.scrollTop = 0; return; }
 
+    await pastikanSaran(inKegiatan);
+    await pastikanSaran(inCatatan);
+    const premiRendah = Math.round(Number(inPremi.value) || 0);
+    if (premiRendah > 0 && premiRendah < 1000) {
+      const lanjut = await tanya('Premi di bawah Rp1.000',
+        `Premi yang dimasukkan ${rupiahPenuh(premiRendah)}. Periksa apakah ada angka atau nol yang kurang.`,
+        { ya: 'Tetap simpan', tidak: 'Periksa lagi' });
+      if (!lanjut) return;
+    }
+
     // Peringatan (bukan penolakan): meter tidak nyambung atau mundur.
     // Selisih MAJU pada awal = unit dipakai di luar kebun (mis. Triton dibawa
     // keluar semalam) — selisihnya memang tidak dihitung premi, cukup dicatat.
     const acuan = meterSebelum(unit.id, inTanggal.value, barisAda?.id);
     const rincian = [];
     const luar = [];   // keterangan pemakaian luar kebun -> masuk catatan
-    if (acuan.ada) {
+    if (acuan.ada && !inResetMeter.checked) {
       if (pakaiHm(unit) && inHmAwal.value !== '' && Math.abs(hmA - acuan.hm) > 0.05) {
         if (hmA > acuan.hm) {
           rincian.push(`HM awal ${angka(hmA, 1)} melompat ${angka(hmA - acuan.hm, 1)} jam dari pembacaan `
@@ -418,20 +455,25 @@ function formLog(barisAda, tglAwal, saatSelesai) {
       premi: Number(inPremi.value) || 0,
       catatan: inCatatan.value.trim(),
       hk: 0,
+      meter_reset: inResetMeter.checked,
+      meter_reset_alasan: inResetMeter.checked ? inAlasanReset.value.trim() : '',
     };
     let idLog;
     if (barisAda) { D.ubah('work_logs', barisAda.id, isi); idLog = barisAda.id; }
     else idLog = D.tambah('work_logs', isi).id;
 
-    // HM/KM dan premi harus di-acc kepala divisi dulu sebelum dihitung;
-    // revisi pun kembali masuk antrean
-    D.tandaiMenunggu('work_logs', idLog);
+    // HK dan catatan operasi langsung berlaku. Hanya premi serta upah
+    // jam/lembur (HM × tarif jam) yang perlu persetujuan kepala divisi.
+    const adaTambahan = (Number(isi.premi) || 0) > 0
+      || (hmPakai(isi) * (Number(D.cari('operators', opId)?.tarif_jam) || 0)) > 0;
+    if (adaTambahan) D.tandaiMenunggu('work_logs', idLog);
+    else D.tanpaPersetujuan('work_logs', idLog);
 
     sebarHk(opId, inTanggal.value, totalHk);
 
     p.tutup();
     pesan((barisAda ? 'Log harian diperbarui' : 'Log harian ditambahkan')
-      + ' — menunggu acc kepala divisi sebelum dihitung di laporan.', 'sukses', 6);
+      + (adaTambahan ? ' — premi/upah jam menunggu persetujuan.' : ' — HK langsung masuk laporan.'), 'sukses', 6);
     saatSelesai();
   };
 
@@ -455,6 +497,11 @@ function formLog(barisAda, tglAwal, saatSelesai) {
         + 'angka ini dibagi otomatis ke tiap barisnya.',
     }),
     catatanHk,
+    el('label', { style: 'display:flex;gap:.5rem;align-items:flex-start;margin:.7rem 0;font-weight:650' }, [
+      inResetMeter,
+      el('span', { teks: 'Meter baru/diganti/reset pada log ini' }),
+    ]),
+    bungkusAlasanReset,
     isian('Kegiatan', inKegiatan),
     isian('Lokasi', inLokasi, { bantuan: 'Dipakai untuk rekap biaya per lokasi.' }),
     isian('Premi (Rp)', inPremi, { bantuan: 'Terisi otomatis dari tarif premi unit; boleh ditimpa manual.' }),
@@ -486,6 +533,8 @@ function formLog(barisAda, tglAwal, saatSelesai) {
     el('button.tombol-utama', { type: 'button', teks: 'Simpan', onclick: simpan }),
   );
   const p = panel(barisAda ? 'Ubah log harian' : 'Tambah log harian', badan, aksi);
+  inResetMeter.addEventListener('change', aturReset);
+  aturReset();
 }
 
 let tglLog = null;
@@ -499,8 +548,17 @@ export function halamanLogHarian({ periode, gambar, bisaEdit }) {
   if (takUrut.length) {
     wadah.append(el('div.petunjuk', {}, [
       el('strong', { teks: 'Meter tidak urut — periksa log berikut:' }),
-      el('ul', {}, takUrut.slice(0, 6).map((t) => el('li', { teks: t }))),
-      takUrut.length > 6 ? el('p', { teks: `…dan ${takUrut.length - 6} lagi.` }) : null,
+      el('details', {}, [
+        el('summary', { teks: `Tampilkan semua ${takUrut.length} masalah` }),
+        el('ul', {}, takUrut.map((m) => el('li', {}, [
+          `${D.labelRef('units', m.unitId)}: ${m.label} ${angka(m.nilai, 1)} pada ${ftanggal(m.tanggal)} `
+            + `lebih kecil dari ${angka(m.nilaiSebelum, 1)} pada ${ftanggal(m.tanggalSebelum)} — `,
+          el('button.tombol-tautan', {
+            type: 'button', teks: 'buka tanggal ini',
+            onclick: () => { tglLog = m.tanggal; gambar(); },
+          }),
+        ]))),
+      ]),
     ].filter(Boolean)));
   }
   const [a, b] = periode.rentang();
@@ -527,9 +585,12 @@ export function halamanLogHarian({ periode, gambar, bisaEdit }) {
       { l: 'Lokasi', k: 'lokasi' },
       { l: 'Kegiatan', k: 'kegiatan' },
       { l: 'Premi (Rp)', k: 'premi', jenis: 'uang', total: true },
-      { l: 'Status', nilai: (r) => (D.menungguPersetujuan('work_logs', r.id)
-        ? el('span.chip.chip-tunggu', { teks: 'Menunggu acc' })
-        : el('span.chip.chip-ok', { teks: 'OK' })) },
+      { l: 'Status tambahan', nilai: (r) => {
+        const status = D.catatanPersetujuan('work_logs', r.id)?.status;
+        if (status === 'menunggu') return el('span.chip.chip-tunggu', { teks: 'Premi/lembur menunggu' });
+        if (status === 'ditolak') return el('span.chip', { teks: 'Premi/lembur ditolak' });
+        return el('span.chip.chip-ok', { teks: status === 'disetujui' ? 'Tambahan disetujui' : 'Tanpa tambahan' });
+      } },
     ], data, {
       kosong: `Belum ada log pada ${ftanggal(tgl)}.`,
       saatKlik: bisaEdit() ? (r) => formLog(r, tgl, () => { gambarIsi(); gambar(); }) : null,
@@ -565,12 +626,27 @@ function formSolar(barisAda, saatSelesai) {
   const inTanggal = el('input', { type: 'date', nilai: barisAda?.tanggal || hariIni() });
   const inUnit = pilihan(opsiUnit(barisAda?.unit_id), barisAda?.unit_id);
   const inOperator = pilihan(opsiOperator(barisAda?.operator_id), barisAda?.operator_id);
+  if (!barisAda) {
+    pasangPilihanCepat(inUnit, referensiSering(['fuel_logs', 'work_logs'], 'unit_id', opsiUnit()), {
+      judul: 'Unit terakhir & sering dipakai',
+    });
+    pasangPilihanCepat(inOperator, referensiSering(['fuel_logs', 'work_logs'], 'operator_id', opsiOperator()), {
+      judul: 'Operator terakhir & sering dipakai',
+    });
+  }
   const inLiter = el('input', { type: 'number', step: '0.1', min: '0', nilai: barisAda?.liter ?? '' });
   const inHarga = el('input', { type: 'number', step: '100', min: '0', nilai: barisAda?.harga_liter ?? '' });
   const inHm = el('input', { type: 'number', step: '0.1', min: '0', nilai: barisAda?.hm ?? '' });
   const inKm = el('input', { type: 'number', step: '0.1', min: '0', nilai: barisAda?.km ?? '' });
-  const inLokasi = el('input', { type: 'text', nilai: barisAda?.lokasi ?? '' });
-  const inCatatan = el('input', { type: 'text', nilai: barisAda?.catatan ?? '' });
+  const riwayatSolar = D.baris('fuel_logs').filter((r) => !r.deleted_at);
+  const inLokasi = pasangSaranRiwayat(
+    el('input', { type: 'text', nilai: barisAda?.lokasi ?? '', autocomplete: 'off' }),
+    riwayatSolar.map((r) => ({ nilai: r.lokasi, tanggal: r.tanggal })),
+  );
+  const inCatatan = pasangSaranRiwayat(
+    el('input', { type: 'text', nilai: barisAda?.catatan ?? '', autocomplete: 'off' }),
+    riwayatSolar.map((r) => ({ nilai: r.catatan, tanggal: r.tanggal })),
+  );
 
   const perbarui = () => {
     const t = (Number(inLiter.value) || 0) * (Number(inHarga.value) || 0);
@@ -685,14 +761,27 @@ function formServis(barisAda, saatSelesai) {
   const tempatGalat = el('div');
   const inTanggal = el('input', { type: 'date', nilai: barisAda?.tanggal || hariIni() });
   const inUnit = pilihan(opsiUnit(barisAda?.unit_id), barisAda?.unit_id);
+  if (!barisAda) pasangPilihanCepat(inUnit,
+    referensiSering(['service_logs', 'work_logs'], 'unit_id', opsiUnit()),
+    { judul: 'Unit terakhir & sering dipakai' });
   const inJenis = pilihan(JENIS_SERVIS.map((j) => ({ nilai: j, label: j })),
     barisAda?.jenis || 'Servis Berkala', { kosongLabel: '— pilih —' });
-  const inDeskripsi = el('input', { type: 'text', nilai: barisAda?.deskripsi ?? '' });
+  const riwayatServis = D.baris('service_logs').filter((r) => !r.deleted_at);
+  const inDeskripsi = pasangSaranRiwayat(
+    el('input', { type: 'text', nilai: barisAda?.deskripsi ?? '', autocomplete: 'off' }),
+    riwayatServis.map((r) => ({ nilai: r.deskripsi, tanggal: r.tanggal })),
+  );
   const inBiaya = el('input', { type: 'number', step: '1000', min: '0', nilai: barisAda?.biaya ?? '' });
   const inHm = el('input', { type: 'number', step: '0.1', min: '0', nilai: barisAda?.hm ?? '' });
   const inKm = el('input', { type: 'number', step: '0.1', min: '0', nilai: barisAda?.km ?? '' });
-  const inBengkel = el('input', { type: 'text', nilai: barisAda?.bengkel ?? '' });
-  const inCatatan = el('input', { type: 'text', nilai: barisAda?.catatan ?? '' });
+  const inBengkel = pasangSaranRiwayat(
+    el('input', { type: 'text', nilai: barisAda?.bengkel ?? '', autocomplete: 'off' }),
+    riwayatServis.map((r) => ({ nilai: r.bengkel, tanggal: r.tanggal })),
+  );
+  const inCatatan = pasangSaranRiwayat(
+    el('input', { type: 'text', nilai: barisAda?.catatan ?? '', autocomplete: 'off' }),
+    riwayatServis.map((r) => ({ nilai: r.catatan, tanggal: r.tanggal })),
+  );
 
   const simpan = () => {
     const salah = [];
@@ -884,40 +973,59 @@ export function halamanTarifPremi({ gambar, bisaEdit }) {
 }
 
 // =====================================================================
-// HALAMAN: Persetujuan log alat berat (kepala divisi Infra)
+// HALAMAN: Persetujuan premi & upah jam/lembur alat (kepala divisi Infra)
 // =====================================================================
 export function jumlahMenungguAlat() {
   return D.baris('work_logs').filter((r) => !r.deleted_at
-    && D.menungguPersetujuan('work_logs', r.id)).length;
+    && D.menungguPersetujuan('work_logs', r.id)
+    && nilaiPersetujuanAlat(r).total > 0).length;
 }
+
+export const nilaiPersetujuanAlat = (r) => {
+  const operator = D.cari('operators', r.operator_id);
+  const upahJam = hmPakai(r) * (Number(operator?.tarif_jam) || 0);
+  const premi = Number(r.premi) || 0;
+  return { upahJam, premi, total: upahJam + premi };
+};
 
 export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
   const bolehSetuju = hak?.setuju || (() => true);
   const bolehBatal = hak?.batal || (() => false);
   const wadah = el('section');
   const tempat = el('div');
+  let tanggalAcc = '';
 
   const gambarIsi = () => {
     kosongkan(tempat);
     const menunggu = D.baris('work_logs')
-      .filter((r) => !r.deleted_at && D.menungguPersetujuan('work_logs', r.id))
+      .filter((r) => !r.deleted_at && D.menungguPersetujuan('work_logs', r.id)
+        && nilaiPersetujuanAlat(r).total > 0)
       .sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
+    const daftarTanggal = [...new Set(menunggu.map((r) => r.tanggal))].sort();
+    if (!daftarTanggal.includes(tanggalAcc)) tanggalAcc = daftarTanggal[0] || '';
+    const menungguTanggal = menunggu.filter((r) => r.tanggal === tanggalAcc);
 
     const putuskan = async (baris, setuju) => {
       if (!bisaEdit()) { pesan('Aktifkan mode edit dulu.', 'awas', 6); return; }
       if (!bolehSetuju()) { pesan('Anda tidak diberi hak menyetujui.', 'awas', 6); return; }
-      const daftarPutus = baris ? [baris] : menunggu;
-      if (!baris) {
+      const daftarPutus = baris ? [baris] : menungguTanggal;
+      let alasan = '';
+      if (!setuju) {
+        alasan = await mintaTeks(
+          baris ? 'Tolak tambahan ini?' : `Tolak ${menungguTanggal.length} tambahan pada ${ftanggal(tanggalAcc)}?`,
+          'Alasan penolakan akan tersimpan di riwayat agar koreksinya jelas.',
+          { label: 'Alasan penolakan', ya: 'Tolak', wajib: true });
+        if (alasan == null) return;
+      } else if (!baris) {
         const lanjut = await tanya(
-          setuju ? `Setujui semua ${menunggu.length} log?` : `Tolak semua ${menunggu.length} log?`,
-          setuju ? 'Semua HM/KM dan preminya langsung dihitung di laporan.'
-            : 'Semua log itu dihapus (masih bisa dipulihkan).',
-          { ya: setuju ? 'Setujui semua' : 'Tolak semua', bahaya: !setuju });
+          `Setujui ${menungguTanggal.length} tambahan pada ${ftanggal(tanggalAcc)}?`,
+          'Premi dan upah jam/lembur langsung dihitung di laporan. HK sudah masuk tanpa menunggu persetujuan.',
+          { ya: 'Setujui tanggal ini' });
         if (!lanjut) return;
       }
       for (const r of daftarPutus) {
         if (setuju) D.setujui('work_logs', r.id, D.namaPengisi() || 'Kepala divisi');
-        else D.tolak('work_logs', r.id, D.namaPengisi() || 'Kepala divisi');
+        else D.tolak('work_logs', r.id, D.namaPengisi() || 'Kepala divisi', alasan);
       }
       pesan(`${daftarPutus.length} log ${setuju ? 'disetujui' : 'ditolak'}. Jangan lupa Simpan.`, 'sukses', 6);
       gambarIsi(); gambar();
@@ -930,20 +1038,29 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
           + 'Log baru (termasuk revisinya) akan muncul di sini.' })]),
       ]));
     } else {
-      const nilai = menunggu.reduce((n, r) => n + (Number(r.premi) || 0), 0);
+      const nilai = menungguTanggal.reduce((n, r) => n + nilaiPersetujuanAlat(r).total, 0);
       tempat.append(el('div.lembar', {}, [
         el('div.lembar-kepala', {}, [
-          el('h2', { teks: `Log menunggu — ${menunggu.length} baris · premi ${rupiahPenuh(nilai)}` }),
-          el('button.tombol-utama.tombol-kecil', { type: 'button', teks: 'Setujui semua', onclick: () => putuskan(null, true) }),
+          el('h2', { teks: `Tambahan menunggu — ${menunggu.length} total` }),
+          pilihan(daftarTanggal.map((x) => ({ nilai: x, label: ftanggal(x) })), tanggalAcc, {
+            kosongLabel: null,
+            saatUbah: (ev) => { tanggalAcc = ev.target.value; gambarIsi(); },
+          }),
+          el('span.status-sinkron', { teks: `${menungguTanggal.length} tanggal ini · tambahan ${rupiahPenuh(nilai)}` }),
+          el('button.tombol-samar.tombol-kecil', { type: 'button', teks: 'Tolak tanggal ini', onclick: () => putuskan(null, false) }),
+          el('button.tombol-utama.tombol-kecil', { type: 'button', teks: 'Setujui tanggal ini', onclick: () => putuskan(null, true) }),
         ]),
         el('div.lembar-isi', {}, [
           tabel([
             { l: 'Tanggal', nilai: (r) => ftanggal(r.tanggal) },
             { l: 'Unit', nilai: (r) => D.labelRef('units', r.unit_id) },
             { l: 'Operator', nilai: (r) => D.labelRef('operators', r.operator_id) },
+            { l: 'HK (langsung)', k: 'hk', jenis: 'hk', total: true },
             { l: 'HM', nilai: hmPakai, jenis: 'angka', pecahan: 1 },
             { l: 'KM', nilai: kmPakai, jenis: 'angka', pecahan: 1 },
-            { l: 'Premi (Rp)', k: 'premi', jenis: 'uang', total: true },
+            { l: 'Upah jam/lembur (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).upahJam, jenis: 'uang', total: true },
+            { l: 'Premi (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).premi, jenis: 'uang', total: true },
+            { l: 'Total tambahan (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).total, jenis: 'uang', total: true },
             { l: '', nilai: (r) => el('span', {}, [
               el('button.tombol-kecil.tombol-utama', { type: 'button', teks: 'Setujui',
                 onclick: (ev) => { ev.stopPropagation(); putuskan(r, true); } }),
@@ -951,7 +1068,7 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
               el('button.tombol-kecil.tombol-samar', { type: 'button', teks: 'Tolak',
                 onclick: (ev) => { ev.stopPropagation(); putuskan(r, false); } }),
             ]) },
-          ], menunggu, { kosong: '—' }),
+          ], menungguTanggal, { kosong: '—' }),
         ]),
       ]));
     }
@@ -959,7 +1076,7 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
     // sudah disetujui — bisa dibatalkan oleh yang punya hak
     const sudah = D.daftarStatus('work_logs', 'disetujui')
       .map((id) => D.cari('work_logs', id))
-      .filter((r) => r && !r.deleted_at)
+      .filter((r) => r && !r.deleted_at && nilaiPersetujuanAlat(r).total > 0)
       .sort((a, b) => String(b.tanggal).localeCompare(String(a.tanggal)))
       .slice(0, 30);
     if (sudah.length) {
@@ -967,13 +1084,16 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
         el('div.lembar-kepala', {}, [el('h2', { teks: 'Sudah disetujui' })]),
         el('div.lembar-isi', {}, [
           el('p.bantuan', { teks: bolehBatal()
-            ? 'Yang telanjur di-acc bisa dibatalkan — kembali menunggu dan keluar dari hitungan laporan.'
+            ? 'Tambahan yang telanjur di-acc bisa dibatalkan — premi/upah jam kembali menunggu. HK tetap masuk.'
             : 'Hanya pengguna dengan hak "Batalkan persetujuan" yang bisa membatalkan.' }),
           tabel([
             { l: 'Tanggal', nilai: (r) => ftanggal(r.tanggal) },
             { l: 'Unit', nilai: (r) => D.labelRef('units', r.unit_id) },
             { l: 'Operator', nilai: (r) => D.labelRef('operators', r.operator_id) },
-            { l: 'Premi (Rp)', k: 'premi', jenis: 'uang' },
+            { l: 'HK (langsung)', k: 'hk', jenis: 'hk' },
+            { l: 'Upah jam/lembur (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).upahJam, jenis: 'uang' },
+            { l: 'Premi (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).premi, jenis: 'uang' },
+            { l: 'Total tambahan (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).total, jenis: 'uang' },
             { l: 'Di-acc oleh', nilai: (r) => D.catatanPersetujuan('work_logs', r.id)?.oleh || '–' },
             ...(bolehBatal() && bisaEdit() ? [{
               l: '', nilai: (r) => el('button.tombol-samar.tombol-kecil', {
@@ -981,7 +1101,7 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
                 onclick: async (ev) => {
                   ev.stopPropagation();
                   if (!await tanya('Batalkan persetujuan log ini?',
-                    'Kembali jadi menunggu dan tidak dihitung di laporan sampai di-acc lagi.',
+                    'Premi dan upah jam kembali menunggu. HK serta catatan operasi tetap masuk laporan.',
                     { ya: 'Batalkan', bahaya: true })) return;
                   D.batalkan('work_logs', r.id, D.namaPengisi() || 'Web');
                   pesan('Dibatalkan — kembali menunggu. Jangan lupa Simpan.', 'sukses', 6);
@@ -997,8 +1117,8 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
 
   gambarIsi();
   wadah.append(el('div.petunjuk', {}, [
-    'Log harian yang baru diinput atau direvisi menunggu acc kepala divisi. Selama menunggu, '
-    + 'HM/KM dan preminya TIDAK dihitung di ringkasan unit, payroll operator, maupun biaya lokasi.',
+    'HK operator dan catatan operasi langsung masuk laporan. Yang menunggu persetujuan kepala divisi '
+    + 'hanya upah jam/lembur dari HM dan premi; selama menunggu, dua tambahan itu belum dihitung.',
   ]), tempat);
   return wadah;
 }
@@ -1027,16 +1147,18 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
     const r = rentangPeriode(periode.tahun, periode.bulan, pilihanMonitor.jenis);
     const dalam = (x) => !x.deleted_at && x.tanggal >= r.dari && x.tanggal <= r.sampai;
 
-    const log = D.baris('work_logs').filter((x) => dalam(x) && D.disetujui('work_logs', x.id));
+    const log = D.baris('work_logs').filter((x) => dalam(x));
     let totalHkOp = 0; let totalJam = 0; let upahHkOp = 0; let upahJam = 0; let premiOp = 0;
     for (const x of log) {
       const o = D.cari('operators', x.operator_id);
       const hk = Number(x.hk) || 0;
       totalHkOp += hk;
-      totalJam += hmPakai(x);
       upahHkOp += hk * (Number(o?.tarif_harian) || 0);
-      upahJam += hmPakai(x) * (Number(o?.tarif_jam) || 0);
-      premiOp += Number(x.premi) || 0;
+      if (D.disetujui('work_logs', x.id)) {
+        totalJam += hmPakai(x);
+        upahJam += hmPakai(x) * (Number(o?.tarif_jam) || 0);
+        premiOp += Number(x.premi) || 0;
+      }
     }
     const biayaSolar = D.baris('fuel_logs').filter(dalam)
       .reduce((n, x) => n + (Number(x.liter) || 0) * (Number(x.harga_liter) || 0), 0);
@@ -1059,7 +1181,7 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
     const target = targetKini();
     const persen = target ? Math.round((upahTk / target) * 1000) / 10 : null;
 
-    // Tanggal kegiatan TERAKHIR yang sudah di-acc — supaya kepala divisi tahu
+    // Tanggal kegiatan TERAKHIR — HK dan operasi tidak menunggu acc.
     // angka di atas sudah sampai tanggal berapa (hari ini tgl 14 tapi input
     // terakhir tgl 12 berarti dua hari belum masuk).
     const tglTerakhir = [...log, ...D.baris('fuel_logs').filter(dalam),
@@ -1098,7 +1220,7 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
         ], [
           { jenis: 'Upah HK operator', jumlah: `${fhk(totalHkOp)} HK`, rp: upahHkOp },
           { jenis: 'Upah jam / lembur operator (HM × tarif jam)', jumlah: `${angka(totalJam, 1)} jam`, rp: upahJam },
-          { jenis: 'Premi operator (disetujui)', jumlah: `${log.length} log`, rp: premiOp },
+          { jenis: 'Premi operator (disetujui)', jumlah: '', rp: premiOp },
           { jenis: 'Solar', jumlah: '', rp: biayaSolar },
           { jenis: 'Servis', jumlah: `${servis.length} kali`, rp: biayaServis },
         ], { kosong: 'Belum ada biaya.' }),
@@ -1121,7 +1243,8 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
             el('p.bantuan', { teks: `Yang diadu ke target hanya upah operator, upah jam, dan `
               + `premi. Solar & servis ${rupiahPenuh(biayaUnit)} tidak ikut dihitung di sini.` }),
             kotakRekomendasi(rekomendasiAnggaran(
-              { total: upahTk, totalHk, upahHk: upahHkGabungan }, target, r.dari, r.sampai), target),
+              { total: upahTk, totalHk, upahHk: upahHkGabungan }, target,
+              r.dari, r.sampai, tglTerakhir), target),
           ]),
       ]),
     ]));
@@ -1156,7 +1279,7 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
       b.rp += (Number(x.liter) || 0) * (Number(x.harga_liter) || 0);
     }
     for (const x of D.baris('work_logs')) {
-      if (!pas(x) || !D.disetujui('work_logs', x.id)) continue;
+      if (!pas(x)) continue;
       const b = ambil(x.unit_id);
       b.hm += hmPakai(x);
       b.km += kmPakai(x);
@@ -1211,7 +1334,7 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
         el('p.bantuan', {
           teks: 'Pengisian solar sifatnya terputus-putus (sekali isi dipakai beberapa hari), jadi '
             + 'pemakaian dihitung per bulan atau keseluruhan — bukan per 2 minggu. '
-            + 'Hanya HM/KM dari log yang sudah di-acc yang dihitung.',
+            + 'HM/KM langsung dihitung karena tidak memerlukan persetujuan.',
         }),
       ]),
     ]));

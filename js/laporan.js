@@ -138,18 +138,21 @@ async function tempelAlatBerat(tempat, per) {
   let upah = 0; let premi = 0; let hm = 0; let km = 0; let hkOp = 0;
   const unit = new Set();
   for (const r of alat.tabel.work_logs) {
-    if (r.deleted_at || r.tanggal < dari || r.tanggal > sampai || !accAlat(r.id)) continue;
+    if (r.deleted_at || r.tanggal < dari || r.tanggal > sampai) continue;
     const o = op.get(Number(r.operator_id));
     const jam = Math.max(0, nol(r.hm_akhir) - nol(r.hm_awal));
+    const tambahanSah = accAlat(r.id);
     hm += jam;
     km += Math.max(0, nol(r.km_akhir) - nol(r.km_awal));
     hkOp += nol(r.hk);
-    upah += nol(r.hk) * nol(o?.tarif_harian) + jam * nol(o?.tarif_jam);
-    premi += nol(r.premi);
+    upah += nol(r.hk) * nol(o?.tarif_harian);
+    if (tambahanSah) {
+      upah += jam * nol(o?.tarif_jam);
+      premi += nol(r.premi);
+    }
     unit.add(Number(r.unit_id));
   }
-  // Tanpa log kerja yang sudah di-acc, tidak ada upah operator untuk
-  // ditampilkan — bagiannya dilewati saja daripada memajang nol.
+  // HK/log operasi langsung sah; hanya tambahan yang menunggu persetujuan.
   if (!unit.size) { tempatAlat.remove(); return; }
 
   taruh(tempatAlat, el('div.lembar', {}, [

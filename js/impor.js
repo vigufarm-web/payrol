@@ -389,7 +389,11 @@ export const JENIS = {
     masukkan(daftar) {
       for (const r of daftar) {
         const baru = D.tambah('work_logs', r.isi);
-        D.tandaiMenunggu('work_logs', baru.id);   // menunggu acc kepala divisi
+        const operator = D.cari('operators', r.isi.operator_id);
+        const jam = Math.max(0, (Number(r.isi.hm_akhir) || 0) - (Number(r.isi.hm_awal) || 0));
+        const adaTambahan = (Number(r.isi.premi) || 0) > 0
+          || jam * (Number(operator?.tarif_jam) || 0) > 0;
+        if (adaTambahan) D.tandaiMenunggu('work_logs', baru.id);
       }
       // HK dibagi ulang per operator per tanggal, sama seperti input manual
       const grup = new Map();

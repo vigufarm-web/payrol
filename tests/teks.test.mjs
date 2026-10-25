@@ -17,3 +17,18 @@ test('membedakan ejaan sama dan typo dekat', () => {
   assert.equal(cariKeteranganSerupa('Pengawsan sore', daftar)?.jenis, 'mirip');
   assert.equal(cariKeteranganSerupa('Penyiraman pagi', daftar), null);
 });
+
+test('angka berbeda tidak pernah dianggap typo', () => {
+  const pasangan = [
+    ['0.17ha', '0.13ha'],
+    ['langsir air 7x', 'langsir air 8x'],
+    ['Lembur 2 jam', 'Lembur 1 jam'],
+    ['Proporsi luas otomatis (56.0%)', 'Proporsi luas otomatis (5.0%)'],
+  ];
+  for (const [baru, lama] of pasangan) {
+    assert.equal(cariKeteranganSerupa(baru, [{ nilai: lama, jumlah: 20 }]), null);
+  }
+  assert.equal(cariKeteranganSerupa('Pengawsan 2 jam', [
+    { nilai: 'Pengawasan 2 jam', jumlah: 20 },
+  ])?.jenis, 'mirip');
+});

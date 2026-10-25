@@ -77,3 +77,55 @@ test('mendeteksi meter mundur dan data solar tidak lengkap', () => {
   assert.ok(hasil.masalah.some((x) => x.jenis === 'Meter mundur'));
   assert.ok(hasil.masalah.some((x) => x.jenis === 'Data solar tidak lengkap'));
 });
+
+test('angka berbeda tidak menghasilkan saran pekerjaan kembar', () => {
+  const data = dasar();
+  data.tabel.daily_payroll.push(
+    hk(1, 0.5, 'Proporsi luas otomatis (56.0%)'),
+    hk(2, 0.5, 'Proporsi luas otomatis (5.0%)'),
+  );
+  const hasil = periksaData(data);
+  assert.equal(hasil.masalah.some((x) => x.jenis === 'Kemungkinan pekerjaan kembar'), false);
+});
+
+test('menyarankan referensi tunggal dari HK orang pada tanggal yang sama', () => {
+  const data = dasar();
+  data.tabel.daily_payroll.push(hk(1, 1));
+  data.tabel.lembur_transactions.push({
+    id: 10, nomor_transaksi: 'LM-1', tanggal: '2026-10-01', employee_id: 1,
+    division_id: 1, block_id: null, wage_component_id: 1,
+    qty: 1, satuan: 'jam', tarif_snapshot: 10000, nominal: 10000,
+  });
+  const masalah = periksaData(data).masalah.find((x) => x.tabel === 'lembur_transactions'
+    && x.id === 10 && x.jenis === 'Referensi kosong');
+  assert.equal(masalah.perbaikan[0].tambalan.block_id, 1);
+});
+
+test('reset meter memulai rangkaian baru dan operasi tanpa solar diperingatkan', () => {
+  const data = {
+    aplikasi: 'AlatBerat',
+    tabel: {
+      units: [{ id: 1, nama_unit: 'EX01' }], operators: [{ id: 1 }],
+      work_logs: [
+        { id: 1, tanggal: '2026-10-01', unit_id: 1, operator_id: 1, hm_awal: 95, hm_akhir: 100 },
+        { id: 2, tanggal: '2026-10-02', unit_id: 1, operator_id: 1, hm_awal: 0, hm_akhir: 2,
+          meter_reset: true, meter_reset_alasan: 'Meter diganti' },
+        { id: 3, tanggal: '2026-10-03', unit_id: 1, operator_id: 1, hm_awal: 2, hm_akhir: 4 },
+      ],
+      fuel_logs: [], service_logs: [],
+    },
+  };
+  const hasil = periksaData(data);
+  assert.equal(hasil.masalah.some((x) => x.jenis === 'Meter tidak urut antartanggal'), false);
+  assert.ok(hasil.masalah.some((x) => x.jenis === 'Operasi tanpa catatan solar'));
+});
+
+test('mendeteksi master pekerjaan yang hampir kembar tanpa menggabungkannya otomatis', () => {
+  const data = dasar();
+  data.tabel.job_types.push({ id: 2, activity_id: 1, nama_jenis: 'Pengawsan' });
+  const hasil = periksaData(data);
+  const masalah = hasil.masalah.find((x) => x.jenis === 'Master hampir kembar'
+    && x.tabel === 'job_types');
+  assert.match(masalah.detail, /Pengawasan/);
+  assert.equal(masalah.perbaikan, undefined);
+});

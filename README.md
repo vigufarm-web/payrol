@@ -117,9 +117,9 @@ Untuk sekadar melihat, token tidak perlu.
    - aplikasi desktop → menu **Sinkron GitHub**, atau
    - situs → menu **Pengaturan → Mode edit**
 
-Buat token **terpisah untuk tiap orang**, supaya bisa dicabut sendiri-sendiri kalau
-HP/laptopnya hilang. Token hanya tersimpan di perangkat masing-masing dan tidak
-pernah ikut ter-upload.
+Untuk alur kerja saat ini, token dapat dipasang pada perangkat admin yang memang
+ditunjuk. Pengguna biasa tetap tidak melihat tombol edit menurut hak akunnya.
+Token hanya tersimpan di perangkat dan tidak ikut ter-upload.
 
 ---
 
@@ -153,14 +153,16 @@ data yang sama** supaya bisa saling membaca.
 - **Tarif premi unit** (menu Sistem, PIN admin): tiap unit diberi *Rp per HM* dan
   *Rp per KM*. Premi operator di log harian lalu terhitung otomatis — HM/KM terpakai ×
   tarif — dan tetap bisa ditimpa manual.
-- **Log harian menunggu acc.** Log baru (termasuk revisinya, dan yang masuk lewat
-  impor Excel) berstatus *Menunggu acc*. Selama menunggu, HM/KM dan preminya **tidak**
-  dihitung di ringkasan unit, payroll operator, biaya lokasi, maupun monitor. Kepala
-  divisi memutuskan di menu **Persetujuan**; menolak = log dihapus (bisa dipulihkan).
+- **Tambahan operator menunggu acc.** HK dan catatan operasi langsung masuk laporan.
+  Yang perlu persetujuan kepala Infra hanya **upah jam/lembur dari HM dan premi**.
+  Selama menunggu, dua tambahan itu belum dihitung; HK, HM/KM, dan kegiatan tetap
+  tercatat. Menolak persetujuan tidak menghapus log maupun HK-nya.
+- Persetujuan massal dibatasi **satu tanggal sekali jalan**. Penolakan wajib disertai
+  alasan supaya koreksinya dapat ditelusuri dan tidak ada salah klik lintas hari.
 - **Monitor biaya** (menu Kepala divisi): solar + servis + premi terhadap target per
   paruh/bulan, lengkap dengan meter dan kotak rekomendasi. Targetnya diatur lewat
   tombol *Atur target* (PIN admin).
-- **Pembatalan**: yang telanjur di-acc — lembur/premi payroll maupun log alat berat —
+- **Pembatalan**: yang telanjur di-acc — lembur/premi payroll maupun tambahan alat berat —
   bisa dibatalkan dari bagian *Sudah disetujui* di halaman Persetujuan oleh pengguna
   yang diberi hak **Batalkan persetujuan**. Statusnya kembali menunggu, tercatat siapa
   yang membatalkan, dan angkanya langsung keluar dari laporan.
@@ -181,6 +183,8 @@ Karena meter tidak mungkin mundur, aplikasi mengawasinya:
   memang benar;
 - di atas halaman Log harian ada **spanduk "Meter tidak urut"** yang mendaftar log
   lama yang angkanya tidak urut, supaya salah ketik tidak mengendap diam-diam.
+- bila hour meter/odometer benar-benar diganti atau di-reset, centang **Meter baru /
+  diganti / reset** dan isi alasannya. Log itu menjadi awal rangkaian meter baru.
 
 **Mengisi dari aplikasi desktop** — seperti biasa, lalu **Sinkron GitHub → Kirim Data**.
 
@@ -216,20 +220,36 @@ terisi otomatis dari Komponen Upah, tetapi dapat disesuaikan per transaksi
 (mis. jam, kg, batang, lubang, atau rit). Kolom **Hasil kerja / keterangan** ikut
 ditampilkan di daftar dan halaman persetujuan agar pekerjaan mudah diaudit.
 
-Kolom pekerjaan dan keterangan juga merapikan spasi otomatis. Jika ejaan hanya
+Kolom pekerjaan dan keterangan menampilkan **input terakhir sebagai tombol yang
+bisa langsung diklik**, sekaligus tetap dapat dicari dengan mengetik. Kolom ini juga
+merapikan spasi otomatis. Jika ejaan hanya
 berbeda kapital/tanda baca, aplikasi memakai ejaan lama yang paling sering dipakai.
 Jika terdeteksi kemungkinan typo 1–2 karakter, aplikasi menawarkan ejaan lama saat
 isian ditinggalkan dan meminta konfirmasi lagi sebelum menyimpan.
 
+Keterangan lembur dan premi **wajib diisi**. Pada daftar HK, admin dapat langsung
+melihat keterangan, nominal, dan status persetujuannya. Tombol pencarian tersedia di
+daftar HK, lembur, dan premi untuk mencari nama/NIK, nomor transaksi, blok, kegiatan,
+atau isi keterangan. Setiap revisi lembur/premi otomatis menggugurkan persetujuan lama
+dan mengembalikannya ke antrean kepala kebun.
+
 Nominal positif di bawah **Rp1.000** pada HK, borongan, lembur, atau premi juga
 memunculkan konfirmasi. Nilainya tetap boleh disimpan jika benar; peringatan ini
 mencegah kekurangan angka atau nol lolos tanpa disadari.
+
+Kotak rekomendasi target selalu menghitung laju sampai **tanggal input terakhir**,
+bukan tanggal hari ini. Dengan begitu data yang belum sempat dimasukkan tidak
+membuat proyeksi terlihat lebih hemat secara keliru.
 
 Pengaman: total HK satu pekerja dalam satu hari **tidak boleh lebih dari 1**. Kalau
 terlampaui, barisnya ditolak dengan keterangan jelas — berlaku untuk keempat cara di
 atas. Dan kalau ada data lama yang telanjur melebihi batas (misalnya kiriman dari
 aplikasi desktop), di atas halaman **HK harian** muncul spanduk peringatan yang
 menyebut nama, tanggal, dan totalnya — tidak ada yang mengendap diam-diam.
+
+Menu **Pemeriksaan data** juga menandai nama master kegiatan/jenis pekerjaan yang
+hampir kembar (misalnya akibat salah satu huruf). Aplikasi tidak menggabungkannya
+otomatis karena transaksi lama perlu diperiksa oleh admin terlebih dahulu.
 
 ## 3c. Impor dari Excel
 

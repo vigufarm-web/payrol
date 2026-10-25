@@ -403,13 +403,24 @@ export function setujui(tabel, id, oleh) {
 }
 
 /** Ditolak = dihapus (masih bisa dipulihkan dari Data terhapus). */
-export function tolak(tabel, id, oleh) {
+export function tolak(tabel, id, oleh, alasan = '') {
   setWeb((w) => {
     w.persetujuan[tabel] ||= {};
     const c = w.persetujuan[tabel][String(id)] || {};
-    w.persetujuan[tabel][String(id)] = { ...c, status: 'ditolak', oleh, waktu: sekarang() };
+    w.persetujuan[tabel][String(id)] = {
+      ...c, status: 'ditolak', oleh, waktu: sekarang(), alasan: String(alasan || '').trim(),
+    };
   });
-  hapus(tabel, id, { lunak: true, aksi: 'tolak' });
+  // Pada log alat, yang ditolak hanya premi dan upah jam/lemburnya.
+  // HK serta catatan operasi tetap sah dan tidak boleh ikut terhapus.
+  if (tabel !== 'work_logs') hapus(tabel, id, { lunak: true, aksi: 'tolak' });
+}
+
+/** Hapus kebutuhan persetujuan (mis. log alat tanpa premi/upah jam). */
+export function tanpaPersetujuan(tabel, id) {
+  setWeb((w) => {
+    if (w.persetujuan?.[tabel]) delete w.persetujuan[tabel][String(id)];
+  });
 }
 
 // ------------------------------------------------------- khusus payroll
@@ -870,6 +881,16 @@ export function ubah(tabel, id, tambalan) {
   periksaTulis('ubah', tabel, { ...r, ...tambalan }); // dan divisi tujuan
   Object.assign(r, tambalan);
   if ('updated_at' in r) r.updated_at = sekarang();
+  // Setiap revisi lembur/premi menggugurkan keputusan lama, dari jalur mana
+  // pun revisinya dilakukan (form, perbaikan data, atau pemulihan).
+  if (['lembur_transactions', 'premi_transactions'].includes(tabel) && !r.deleted_at) {
+    const w = web();
+    w.persetujuan[tabel] ||= {};
+    const lama = w.persetujuan[tabel][String(id)] || {};
+    w.persetujuan[tabel][String(id)] = {
+      ...lama, status: 'menunggu', diinput: namaPengisi() || 'Web', waktu: sekarang(),
+    };
+  }
   tandaiBerubah();
   return r;
 }

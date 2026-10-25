@@ -7,7 +7,7 @@
 
 import * as D from './data.js';
 import {
-  el, tabel, kosongkan, taruh, isian, pilihan, panel, tanya, pesan, kesalahan,
+  el, tabel, kosongkan, taruh, isian, pilihan, panel, tanya, mintaTeks, pesan, kesalahan,
   rupiah, rupiahPenuh, angka, hk as fhk, tanggal as ftanggal, namaBulan, waktu,
 } from './ui.js';
 
@@ -173,7 +173,7 @@ export function targetPeriode(divisionId, tahun, bulan, jenis) {
  * karena itu yang bisa diatur kepala kebun. Borongan, solar, dan servis ikut
  * mengurangi sisa anggaran tapi tidak ikut jadi angka HK.
  */
-export function rekomendasiAnggaran(b, target, dari, sampai, hariIniStr = null) {
+export function rekomendasiAnggaran(b, target, dari, sampai, tanggalAcuan = null) {
   if (!(target > 0)) return null;
 
   const hari = (s) => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d); };
@@ -181,9 +181,12 @@ export function rekomendasiAnggaran(b, target, dari, sampai, hariIniStr = null) 
   const hariTotal = Math.round((hari(sampai) - hari(dari)) / SEHARI) + 1;
   if (hariTotal <= 0) return null;
 
-  const kini = hariIniStr || new Date().toISOString().slice(0, 10);
+  // Wajib memakai tanggal input terakhir. Memakai tanggal hari ini saat
+  // input tertinggal akan mengecilkan rata-rata dan membuat proyeksi tampak
+  // lebih aman daripada kondisi data yang benar-benar sudah masuk.
+  const kini = tanggalAcuan;
   let hariJalan;
-  if (kini < dari) hariJalan = 0;
+  if (!kini || kini < dari) hariJalan = 0;
   else if (kini > sampai) hariJalan = hariTotal;
   else hariJalan = Math.round((hari(kini) - hari(dari)) / SEHARI) + 1;
   const hariSisa = hariTotal - hariJalan;
@@ -200,6 +203,7 @@ export function rekomendasiAnggaran(b, target, dari, sampai, hariIniStr = null) 
 
   return {
     hariTotal, hariJalan, hariSisa,
+    tanggalAcuan: kini,
     sisaRp, biayaPerHk, rpPerHari, hkPerHari, proyeksi, jatahRp, jatahHk,
     selesai: hariSisa <= 0,
     belumMulai: hariJalan === 0,
@@ -219,7 +223,8 @@ export function kotakRekomendasi(k, target) {
   } else {
     baris.push(el('p', {
       teks: `Laju sekarang: ${fhk(k.hkPerHari)} HK dan ${rupiahPenuh(k.rpPerHari)} per hari `
-        + `(${k.hariJalan} hari berjalan dari ${k.hariTotal}).`,
+        + `(${k.hariJalan} hari data dari ${k.hariTotal}`
+        + `${k.tanggalAcuan ? `, sampai ${ftanggal(k.tanggalAcuan)}` : ''}).`,
     }));
   }
 
@@ -421,7 +426,8 @@ export function halamanLaporanKebun({ periode, gambar, hak }) {
                 + `${rupiahPenuh(b.nilaiMenunggu)} yang masih menunggu persetujuan — belum dihitung di angka di atas.`,
               ])
               : null,
-            kotakRekomendasi(rekomendasiAnggaran(b, target, r.dari, r.sampai), target),
+            kotakRekomendasi(rekomendasiAnggaran(
+              b, target, r.dari, r.sampai, b.inputTerakhir), target),
           ]),
         ]),
       ]),
@@ -828,6 +834,7 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
   const wadah = el('section');
   const tempat = el('div');
   const sudahPin = new Set();   // divisi yang PIN-nya sudah dimasukkan di sesi ini
+  const tanggalAcc = new Map(); // cegah acc massal lintas tanggal
 
   const gambarIsi = () => {
     const menunggu = [];
@@ -884,10 +891,16 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
     };
 
     for (const [divId, daftarAsli] of perDivisi) {
-      const daftar = kelompokkan(daftarAsli);
+      const semua = kelompokkan(daftarAsli);
+      const daftarTanggal = [...new Set(semua.map((r) => r.tanggal))].sort();
+      const tanggalDipilih = daftarTanggal.includes(tanggalAcc.get(divId))
+        ? tanggalAcc.get(divId) : daftarTanggal[0];
+      tanggalAcc.set(divId, tanggalDipilih);
+      const daftar = semua.filter((r) => r.tanggal === tanggalDipilih);
       const divisi = divId ? D.labelRef('divisions', divId) : '(tanpa divisi)';
       const kepala = D.web().kebun?.[divId]?.kepala || '';
       const nilai = daftar.reduce((n, r) => n + (Number(r.nominal) || 0), 0);
+      const nilaiSemua = semua.reduce((n, r) => n + (Number(r.nominal) || 0), 0);
 
       const putuskan = async (baris, setuju) => {
         if (!bisaEdit()) {
@@ -911,18 +924,23 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
           sudahPin.add(divId);
         }
         const daftarPutus = baris ? (baris._anggota || [baris]) : daftar.flatMap((x) => x._anggota || [x]);
-        if (!baris) {
+        let alasan = '';
+        if (!setuju) {
+          alasan = await mintaTeks(
+            baris ? `Tolak ${baris._label.toLowerCase()} ini?` : `Tolak ${daftar.length} catatan pada ${ftanggal(tanggalDipilih)}?`,
+            'Alasan penolakan akan tersimpan di riwayat agar koreksinya jelas.',
+            { label: 'Alasan penolakan', ya: 'Tolak', wajib: true });
+          if (alasan == null) return;
+        } else if (!baris) {
           const lanjut = await tanya(
-            setuju ? `Setujui semua ${daftar.length} baris?` : `Tolak semua ${daftar.length} baris?`,
-            setuju
-              ? `Total ${rupiahPenuh(nilai)} akan masuk hitungan biaya ${divisi}.`
-              : `${daftar.length} baris akan dihapus dari ${divisi}. Masih bisa dipulihkan lewat Data terhapus.`,
-            { ya: setuju ? 'Setujui semua' : 'Tolak semua', bahaya: !setuju });
+            `Setujui ${daftar.length} catatan pada ${ftanggal(tanggalDipilih)}?`,
+            `Total ${rupiahPenuh(nilai)} akan masuk hitungan biaya ${divisi}.`,
+            { ya: 'Setujui tanggal ini' });
           if (!lanjut) return;
         }
         for (const r of daftarPutus) {
           if (setuju) D.setujui(r._tabel, r.id, kepala || D.namaPengisi() || 'Kepala kebun');
-          else D.tolak(r._tabel, r.id, kepala || D.namaPengisi() || 'Kepala kebun');
+          else D.tolak(r._tabel, r.id, kepala || D.namaPengisi() || 'Kepala kebun', alasan);
         }
         pesan(setuju
           ? `${daftarPutus.length} baris disetujui. Jangan lupa Simpan ke GitHub.`
@@ -935,12 +953,18 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
         el('div.lembar-kepala', {}, [
           el('h2', { teks: divisi }),
           kepala ? el('span.lencana-mode', { teks: `Kepala: ${kepala}` }) : null,
-          el('span.status-sinkron', { teks: `${daftar.length} catatan · ${rupiahPenuh(nilai)}` }),
+          pilihan(daftarTanggal.map((x) => ({ nilai: x, label: ftanggal(x) })), tanggalDipilih, {
+            kosongLabel: null,
+            saatUbah: (ev) => { tanggalAcc.set(divId, ev.target.value); gambarIsi(); },
+          }),
+          el('span.status-sinkron', {
+            teks: `${daftar.length} tanggal ini · ${rupiahPenuh(nilai)} (total antrean ${semua.length} · ${rupiahPenuh(nilaiSemua)})`,
+          }),
           el('button.tombol-samar.tombol-kecil', {
-            type: 'button', teks: 'Tolak semua', onclick: () => putuskan(null, false),
+            type: 'button', teks: 'Tolak tanggal ini', onclick: () => putuskan(null, false),
           }),
           el('button.tombol-utama.tombol-kecil', {
-            type: 'button', teks: 'Setujui semua', onclick: () => putuskan(null, true),
+            type: 'button', teks: 'Setujui tanggal ini', onclick: () => putuskan(null, true),
           }),
         ]),
         el('div.lembar-isi', {}, [
