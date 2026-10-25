@@ -566,3 +566,6 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .rekomendasi p { margin: 0.35rem 0; }
 .rekomendasi .rekomendasi-utama { font-weight: 600; }
 .rekomendasi .rekomendasi-awas { color: var(--merah); font-weight: 600; }
+
+/* Keep one block card visible when the input panel has many grid rows. */
+.panel-isi .daftar-pilihan { min-height: 4.5rem; align-content: start; }
