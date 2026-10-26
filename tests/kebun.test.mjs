@@ -8,7 +8,7 @@ globalThis.localStorage = {
 };
 const { rekomendasiAnggaran } = await import('../js/kebun.js');
 const D = await import('../js/data.js');
-const { nilaiPersetujuanAlat } = await import('../js/input-alat.js');
+const { nilaiPersetujuanAlat,rincianPersetujuanAlat } = await import('../js/input-alat.js');
 
 test('rekomendasi berhenti pada tanggal input terakhir, bukan tanggal hari ini', () => {
   const k = rekomendasiAnggaran(
@@ -61,7 +61,11 @@ test('revisi lembur selalu menggugurkan persetujuan lama', () => {
     web: { persetujuan: { lembur_transactions: { 3: { status: 'disetujui', oleh: 'Kepala' } } } },
     tabel: { lembur_transactions: [{ id: 3, nominal: 50_000, catatan: 'Awal' }] },
   };
+  assert.throws(()=>D.ubah('lembur_transactions',3,{catatan:'Keterangan direvisi'}),/kepala divisi/);
+  D.batalkan('lembur_transactions',3,'Kepala');
   D.ubah('lembur_transactions', 3, { catatan: 'Keterangan direvisi' });
   assert.equal(D.catatanPersetujuan('lembur_transactions', 3).status, 'menunggu');
   assert.equal(D.cari('lembur_transactions', 3).catatan, 'Keterangan direvisi');
 });
+
+test('rincian persetujuan menampilkan ritase dan tarif tanpa mengganti premi tercatat',()=>{D.state.data={web:{unitPremi:{1:{rit:5000}}},tabel:{operators:[{id:1,tarif_jam:20000}]}};const r={unit_id:1,operator_id:1,ritase:12,premi:77500,hm_awal:0,hm_akhir:0};const text=rincianPersetujuanAlat(r);assert.match(text,/12,00 rit/);assert.match(text,/77.500/);assert.equal(r.premi,77500);});

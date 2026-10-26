@@ -1,3 +1,4 @@
+import {payrollLedger,payrollWorkers,operatorPayroll} from './payroll-model.js';
 // rekap-gaji.js — Unduhan "Rekap Gaji Tenaga Kerja Harian" (.xlsx) dengan
 // susunan lembar mengikuti format rekap perusahaan:
 //   1. Summary Pembayaran   : per orang (gabungan semua divisi) + tanda tangan
@@ -9,7 +10,7 @@
 //   7. Penjualan            : kosong, diisi manual
 //   8. Peringatan HK        : orang-hari dengan HK melebihi batas
 // Termasuk upah operator Alat Berat & Kendaraan (dibaca dari bagiannya,
-// hanya log yang sudah di-acc). Hanya untuk admin semua-divisi.
+// HK selalu masuk; lembur/premi hanya yang di-acc). Hanya untuk admin semua-divisi.
 
 import * as D from './data.js';
 import { unduhXlsx, S } from './xlsx-tulis.js';
@@ -46,7 +47,7 @@ function daftarTanggal(dari, sampai) {
 }
 
 // ------------------------------------------------------- kumpulkan angka
-export async function dataRekap(dari, sampai) {
+export async function dataRekap(dari, sampai, {alatData}={}) {
   const dalam = (r) => !r.deleted_at && r.tanggal >= dari && r.tanggal <= sampai;
   const namaDiv = new Map(D.baris('divisions').map((d) => [Number(d.id), d.nama_divisi]));
 
@@ -54,7 +55,7 @@ export async function dataRekap(dari, sampai) {
   const ambil = (divisi, kunciId, nama, rek) => {
     const k = `${divisi}|${kunciId}`;
     if (!orang.has(k)) {
-      orang.set(k, { divisi, nama, rek: rapiRek(rek) || 'norekening',
+      orang.set(k, { identity:kunciId, divisi, nama, rek: rapiRek(rek) || 'norekening',
         hk: 0, gaji: 0, tambahan: 0, normal: {}, lembur: {}, premi: {} });
     }
     return orang.get(k);
@@ -73,48 +74,18 @@ export async function dataRekap(dari, sampai) {
     return m.get(k);
   };
 
-  // ---- payroll: HK harian
-  for (const r of D.baris('daily_payroll')) {
-    if (!dalam(r)) continue;
-    const e = D.cari('employees', r.employee_id);
-    const div = namaDiv.get(Number(r.division_id)) || `#${r.division_id}`;
-    const o = ambil(div, `p${r.employee_id}`, e?.nama || `#${r.employee_id}`, e?.rekening);
-    const n = Number(r.nominal) || 0;
-    o.hk += Number(r.hk) || 0;
-    o.gaji += n;
-    o.normal[r.tanggal] = (o.normal[r.tanggal] || 0) + n;
-    const labelJob = r.job || D.labelRef('job_types', r.job_type_id);
-    const j = job(div, labelJob);
-    j.hk += Number(r.hk) || 0; j.pokok += n;
-  }
-  // ---- payroll: borongan (ikut gaji pokok)
-  for (const r of D.baris('borongan_transactions')) {
-    if (!dalam(r)) continue;
-    const e = D.cari('employees', r.employee_id);
-    const div = namaDiv.get(Number(r.division_id)) || `#${r.division_id}`;
-    const o = ambil(div, `p${r.employee_id}`, e?.nama || `#${r.employee_id}`, e?.rekening);
-    const n = Number(r.nominal) || 0;
-    o.gaji += n;
-    o.normal[r.tanggal] = (o.normal[r.tanggal] || 0) + n;
-    job(div, 'Borongan').pokok += n;
-  }
-  // ---- payroll: lembur & premi (HANYA yang sudah di-acc)
-  for (const [tabel, kantong] of [['lembur_transactions', 'lembur'], ['premi_transactions', 'premi']]) {
-    for (const r of D.baris(tabel)) {
-      if (!dalam(r) || !D.disetujui(tabel, r.id)) continue;
-      const e = D.cari('employees', r.employee_id);
-      const div = namaDiv.get(Number(r.division_id)) || '(tanpa divisi)';
-      const o = ambil(div, `p${r.employee_id}`, e?.nama || `#${r.employee_id}`, e?.rekening);
-      const n = Number(r.nominal) || 0;
-      o.tambahan += n;
-      o[kantong][r.tanggal] = (o[kantong][r.tanggal] || 0) + n;
-      job(div, r.keterangan_manual || D.labelRef('wage_components', r.wage_component_id)).tambahan += n;
-    }
+  for(const r of payrollLedger(D.state.data,dari,sampai)){
+    const e=D.cari('employees',r.employee_id),div=namaDiv.get(Number(r.division_id))||`#${r.division_id}`,o=ambil(div,`p${r.employee_id}`,e?.nama||`#${r.employee_id}`,e?.rekening),normal=['hk','borongan'].includes(r.type),kantong=normal?'normal':r.type;
+    o.hk+=r.hk;if(normal)o.gaji+=r.amount;else o.tambahan+=r.amount;
+    o[kantong][r.tanggal]=(o[kantong][r.tanggal]||0)+r.amount;
+    const label=r.type==='hk'?(r.job||D.labelRef('job_types',r.job_type_id)):r.type==='borongan'?'Borongan':r.keterangan_manual||D.labelRef('wage_components',r.wage_component_id),j=job(div,label);
+    j.hk+=r.hk;if(normal)j.pokok+=r.amount;else j.tambahan+=r.amount;
   }
 
   // ---- operator alat berat & kendaraan (dari bagiannya sendiri)
   let alatTerbaca = false;
-  const alat = await D.muatBagianLain('data/alat-berat.json');
+  const alat = alatData!==undefined?alatData:D.state.aplikasi==='AlatBerat'?D.state.data:await D.muatBagianLain('data/alat-berat.json');
+  if(!alat?.tabel?.work_logs)throw new Error('Data alat belum terbaca. Muat ulang/sambungkan bagian alat agar rekap gabungan tidak kurang.');
   if (alat?.tabel?.work_logs) {
     alatTerbaca = true;
     const DIV = 'Alat Berat & Kendaraan';
@@ -129,16 +100,16 @@ export async function dataRekap(dari, sampai) {
       const o = ambil(DIV, `a${r.operator_id}`, o0?.nama || `Operator #${r.operator_id}`, o0?.no_rekening);
       const jam = Math.max(0, (Number(r.hm_akhir) || 0) - (Number(r.hm_awal) || 0));
       const tambahanSah = acc(r.id);
-      const pokok = (Number(r.hk) || 0) * (Number(o0?.tarif_harian) || 0)
-        + (tambahanSah ? jam * (Number(o0?.tarif_jam) || 0) : 0);
+      const pokok=(Number(r.hk)||0)*(Number(o0?.tarif_harian)||0),lembur=tambahanSah?jam*(Number(o0?.tarif_jam)||0):0;
       const premi = tambahanSah ? (Number(r.premi) || 0) : 0;
       o.hk += Number(r.hk) || 0;
       o.gaji += pokok;
-      o.tambahan += premi;
+      o.tambahan += lembur+premi;
+      if(lembur)o.lembur[r.tanggal]=(o.lembur[r.tanggal]||0)+lembur;
       if (pokok) o.normal[r.tanggal] = (o.normal[r.tanggal] || 0) + pokok;
       if (premi) o.premi[r.tanggal] = (o.premi[r.tanggal] || 0) + premi;
       const j = job(DIV, r.kegiatan || 'Operasional alat');
-      j.hk += Number(r.hk) || 0; j.pokok += pokok; j.tambahan += premi;
+      j.hk += Number(r.hk) || 0; j.pokok += pokok; j.tambahan += lembur+premi;
     }
   }
 
@@ -160,7 +131,10 @@ export async function dataRekap(dari, sampai) {
 
   const baris = [...orang.values()]
     .sort((a, b) => a.divisi.localeCompare(b.divisi, 'id') || a.nama.localeCompare(b.nama, 'id'));
-  return { baris, jobdesk, labelKegiatan: ejaanUtama(ejaan), peringatan, batas, alatTerbaca,
+  const totals=rows=>({hk:rows.reduce((n,r)=>n+Number(r.hk||0),0),total:rows.reduce((n,r)=>n+Number(r.total??(r.gaji+r.tambahan)),0)}),payroll=totals(payrollWorkers(D.state.data,dari,sampai)),operator=totals(operatorPayroll(alat,dari,sampai));
+  for(const [prefix,expected] of [['p',payroll],['a',operator]]){const actual=totals(baris.filter(r=>r.identity.startsWith(prefix)));if(Math.abs(actual.hk-expected.hk)>1e-6||Math.abs(actual.total-expected.total)>.005)throw new Error('Audit rekap tidak cocok dengan aplikasi. Unduhan dibatalkan agar angka tidak berbeda.');}
+  const audit={payroll,operator,combined:{hk:payroll.hk+operator.hk,total:payroll.total+operator.total}};
+  return { audit, baris, jobdesk, labelKegiatan: ejaanUtama(ejaan), peringatan, batas, alatTerbaca,
     tanggal: daftarTanggal(dari, sampai) };
 }
 
@@ -179,13 +153,13 @@ const kepalaLaporan = (judulKecil, dari, sampai, lebarKolom) => {
   };
 };
 
-export async function susunRekap(dari, sampai) {
-  const { baris, jobdesk, labelKegiatan, peringatan, batas, alatTerbaca, tanggal } = await dataRekap(dari, sampai);
+export async function susunRekap(dari, sampai, options={}) {
+  const { audit, baris, jobdesk, labelKegiatan, peringatan, batas, alatTerbaca, tanggal } = await dataRekap(dari, sampai, options);
 
-  // ---- 1. Summary Pembayaran: gabungkan per ORANG (nama+rek) lintas divisi
+  // ---- 1. Summary Pembayaran: gabungkan ID pekerja stabil lintas divisi; nama sama tidak digabung tanpa bukti
   const perOrang = new Map();
   for (const b of baris) {
-    const k = `${b.nama.toLowerCase()}|${b.rek}`;
+    const k = b.identity;
     if (!perOrang.has(k)) perOrang.set(k, { nama: b.nama, rek: b.rek, hk: 0, gaji: 0, tambahan: 0 });
     const o = perOrang.get(k);
     o.hk += b.hk; o.gaji += b.gaji; o.tambahan += b.tambahan;
@@ -354,6 +328,9 @@ export async function susunRekap(dari, sampai) {
     s8.baris.push([], [S.tebal('Catatan: bagian Alat Berat & Kendaraan tidak terbaca — upah operator belum ikut di rekap ini.')]);
   }
 
+  s8.baris.push([], [S.tebal('AUDIT KECOCOKAN DENGAN APLIKASI')], ['Cakupan','HK','Total Rp'].map(S.kepala));
+  for(const [label,v] of [['Payroll aktif',audit.payroll],['Operator alat',audit.operator],['Gabungan Excel',audit.combined]])s8.baris.push([S.teks(label),S.angka(v.hk),S.uang(v.total)]);
+  s8.baris.push([S.catatan('CSV mengikuti payroll yang tampil. Rekap Excel menggabungkan payroll aktif dan operator; subtotal di atas diperiksa sebelum unduhan.')]);
   return [s1, s2, s3, s4, s5, s6, s7, s8];
 }
 
@@ -391,7 +368,7 @@ export function dialogRekapGaji(periode) {
   const p = panel('Unduh Rekap Gaji (Excel)', el('div', {}, [
     el('p', { teks: 'Berisi 8 lembar: summary pembayaran, jobdesk, lampiran per divisi, '
       + 'detail harian (normal/lembur/premi), lembar penjualan kosong, dan peringatan HK. '
-      + 'Lembur & premi yang belum di-acc TIDAK ikut dihitung.' }),
+      + 'Lembur & premi yang belum di-acc TIDAK ikut dihitung. CSV sama dengan payroll yang tampil; Excel menggabungkan payroll aktif dan operator. Lembar Peringatan HK memuat audit subtotal masing-masing dan total gabungan.' }),
     el('div.baris-isian', {}, [
       isian('Dari tanggal *', inDari),
       isian('Sampai tanggal *', inSampai),

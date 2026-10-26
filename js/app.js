@@ -577,7 +577,9 @@ function gambarTanpaAkses(judulHalaman) {
   tandaiMenuAktif();
 }
 
+const trashChecked=new WeakMap();
 export function gambar() {
+  if(D.state.data&&bisaEdit()&&(!P.adaPengguna()||P.adalahAdmin())){const day=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'});if(trashChecked.get(D.state.data)!==day){trashChecked.set(D.state.data,day);const n=D.bersihkanSampah();if(n)pesan(n+' transaksi sampah lebih dari 30 hari dibersihkan. Klik Simpan untuk menyinkronkan ke GitHub.','sukses',10);}}
   const m = modulAktif();
   bangunMenu();
   elSisi.classList.remove('buka');

@@ -1,3 +1,5 @@
+import {explainApproval} from './approval-editor.js';
+import {mandorHKPanel} from './mandor-hk.js';
 // transaksi.js — halaman input: HK harian (satuan & massal), borongan,
 // lembur, premi, serta data yang sudah dihapus.
 //
@@ -10,7 +12,7 @@ import { TABEL } from './skema-payroll.js';
 import { rapikanKeterangan } from './teks.js';
 import { pasangSaranRiwayat, pastikanSaran } from './saran-input.js';
 import {
-  el, tabel, isian, pilihan, pilihanCari, pasangPilihanCepat, kesalahan, panel, tanya, pesan, kosongkan, taruh,
+  el, tabel, isian, pilihan, pilihanCari, kesalahan, panel, tanya, pesan, kosongkan, taruh,
   rupiah, rupiahPenuh, hk as fhk, tanggal as ftanggal, hariIni, angka,
 } from './ui.js';
 
@@ -82,8 +84,6 @@ function referensiSering(tabelNama, kolom, opsi, batas = 7) {
     }));
 }
 
-const pekerjaSering = () => referensiSering('daily_payroll', 'employee_id',
-  D.aktif('employees').map((e) => ({ nilai: e.id, label: e.nama })), 8);
 const kunciCari = (nilai) => rapikanKeterangan(nilai).toLocaleLowerCase('id');
 const cocokCari = (kata, ...nilai) => !kata
   || kunciCari(nilai.filter((x) => x != null).join(' ')).includes(kunciCari(kata));
@@ -313,9 +313,6 @@ function formHK(barisAda, tgl, saatSelesai) {
   const inKaryawan = pilihanCari(
     D.aktif('employees').map((r) => ({ nilai: r.id, label: `${r.nama} (${r.nik})` })),
     barisAda?.employee_id, { tempat: 'Ketik nama atau NIK…', saatUbah: () => perbarui() });
-  if (!barisAda) pasangPilihanCepat(inKaryawan, pekerjaSering(), {
-    saatPilih: (id) => { inKaryawan.setNilai(id); perbarui(); },
-  });
 
   const awal = (k) => barisAda?.[k] ?? terakhir[k] ?? '';
   const inDivisi = pilihan(opsiMaster('divisions', awal('division_id')), awal('division_id'),
@@ -1072,9 +1069,7 @@ function formMassal(tgl, saatSelesai) {
   // ---------------- daftar pekerja ----------------
   const pekerja = D.aktif('employees').sort((a, b) => a.nama.localeCompare(b.nama, 'id'));
   const centang = new Map();
-  const tombolCepatPekerja = new Map();
   const daftarPekerja = el('div.daftar-pilihan.daftar-pekerja', {});
-  const cepatPekerja = el('div.pilihan-cepat', {});
   const hitung = el('p.ringkas-pilihan.ringkas-massal', { teks: '0 pekerja dipilih' });
 
   const blokTerpilih = () => [...centangBlok.entries()].filter(([, c]) => c.checked).map(([id]) => id);
@@ -1090,7 +1085,6 @@ function formMassal(tgl, saatSelesai) {
     }
     for (const [id, c] of centang) {
       c.parentElement?.classList.toggle('terpilih', c.checked);
-      tombolCepatPekerja.get(id)?.classList.toggle('aktif', c.checked);
     }
     ringkasBlok.textContent = blok.length
       ? `${blok.length} blok dipilih: ${blok.map((id) => D.labelRef('blocks', id)).slice(0, 4).join(', ')}`
@@ -1136,23 +1130,6 @@ function formMassal(tgl, saatSelesai) {
         el('small', { teks: `${e.nik || 'Tanpa NIK'} · ${rupiahPenuh(e.tarif_hk)}/HK` }),
       ]),
     ]));
-  }
-
-  const seringPekerja = pekerjaSering();
-  if (seringPekerja.length) {
-    cepatPekerja.append(
-      el('span.pilihan-cepat-label', { teks: 'Pekerja terakhir & sering dipakai' }),
-      el('div.pilihan-cepat-daftar', {}, seringPekerja.map((o) => {
-        const b = el('button.pilihan-cepat-tombol', {
-          type: 'button', onclick: () => {
-            const c = centang.get(o.nilai);
-            if (c) { c.checked = !c.checked; perbaruiHitung(); }
-          },
-        }, [el('strong', { teks: o.label }), el('small', { teks: o.keterangan })]);
-        tombolCepatPekerja.set(o.nilai, b);
-        return b;
-      })),
-    );
   }
 
   const cariPekerja = el('input', {
@@ -1328,7 +1305,6 @@ function formMassal(tgl, saatSelesai) {
     daftarBlok,
     ringkasBlok,
     el('label', { style: 'display:block;font-size:.85rem;font-weight:600;margin:.8rem 0 .22rem' }, ['Pekerja *']),
-    cepatPekerja,
     el('div.alat-pilihan', {}, [cariPekerja, tombolSemuaPekerja]),
     daftarPekerja,
     hitung,
@@ -1467,7 +1443,7 @@ function hkLebihBatas() {
   return masalah.sort((x, y) => String(x.tanggal).localeCompare(String(y.tanggal)));
 }
 
-export function halamanHK({ periode, gambar, bisaEdit }) {
+export function halamanHK({ periode, gambar, bisaEdit, hkLoad }) {
   const wadah = el('section');
 
   // warning: orang-hari yang HK-nya melebihi batas
@@ -1486,6 +1462,8 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
   tglHK = tgl;
 
   const tempat = el('div');
+  const hkMandor=mandorHKPanel(()=>tgl,{load:hkLoad});
+  wadah.append(hkMandor.box);
   let kataCariHk = '';
   const inCariHk = el('input.pencarian-input', {
     type: 'search', placeholder: 'Nama, NIK, blok, kegiatan, atau keterangan lembur…',
@@ -1499,6 +1477,7 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
   });
 
   const gambarIsi = () => {
+    hkMandor.refresh();
     const data = saringDivisi(hidup('daily_payroll'))
       .filter((r) => r.tanggal === tgl)
       .sort((x, y) => D.labelRef('employees', x.employee_id)
@@ -1514,7 +1493,7 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
         if (!tambahan.has(k)) tambahan.set(k, { per: new Map(), rincian: new Map(), jumlah: 0 });
         const t = tambahan.get(k);
         const n = Number(r.nominal) || 0;
-        t.jumlah += n;
+        if(D.disetujui(tabelT,r.id))t.jumlah += n;
         // jumlahkan per jenis (L/P) — lembur yang dibagi ke banyak blok
         // tampil sebagai SATU angka, bukan "L 5.000 + L 5.000 + …"
         t.per.set(kode, (t.per.get(kode) || 0) + n);
@@ -1579,7 +1558,7 @@ export function halamanHK({ periode, gambar, bisaEdit }) {
       }),
       tambahan.size ? el('p.bantuan', {
         teks: 'Keterangan, nominal, dan status lembur/premi ditampilkan langsung. Klik baris HK untuk merevisi; '
-          + 'setiap revisi lembur/premi otomatis kembali menunggu persetujuan.',
+          + 'lembur/premi yang belum disetujui boleh langsung direvisi. Jika sudah disetujui, minta kepala divisi membatalkan persetujuan terlebih dahulu.',
       }) : null,
     );
   };
@@ -1631,7 +1610,6 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
   const inKaryawan = pilihanCari(
     D.aktif('employees').map((r) => ({ nilai: r.id, label: `${r.nama} (${r.nik})` })),
     barisAda?.employee_id ?? awal.employee_id, { tempat: 'Ketik nama atau NIK…' });
-  if (!barisAda) pasangPilihanCepat(inKaryawan, pekerjaSering());
   const inKomponen = pilihan(opsiKomponen(kategori, barisAda?.wage_component_id),
     barisAda?.wage_component_id, { saatUbah: () => perbarui() });
   const inQty = el('input', { type: 'number', step: '0.01', min: '0', nilai: barisAda?.qty ?? '' });
@@ -1817,6 +1795,7 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
     el('button.tombol-utama', { type: 'button', teks: 'Simpan', onclick: simpan }),
   );
   const p = panel(barisAda ? `Ubah ${kategori.toLowerCase()}` : `Tambah ${kategori.toLowerCase()}`, badan, aksi);
+  explainApproval(p,namaTabel,barisAda);
 }
 
 function lembarTransaksi(namaTabel, kategori, prefix, periode, gambar, bisaEdit) {
@@ -1976,7 +1955,7 @@ export function halamanTerhapus({ gambar, bisaEdit }) {
   wadah.append(el('div.lembar', {}, [
     el('div.lembar-kepala', {}, [el('h2', { teks: 'Data terhapus' })]),
     el('div.lembar-isi', {}, [
-      el('p.bantuan', { teks: 'Transaksi yang dihapus tidak langsung hilang — tetap tersimpan di sini, sama seperti Recycle Bin di aplikasi desktop.' }),
+      el('p.bantuan', { teks: 'Sampah dapat dipulihkan selama 30 hari. Setelah lewat 30 hari, admin membuka aplikasi akan membersihkan sampah; klik Simpan untuk menyinkronkan penghapusannya ke GitHub.' }),
       tempat,
     ]),
   ]));

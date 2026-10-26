@@ -1,3 +1,4 @@
+import {purgeExpiredTrash} from './trash-retention.js';
 // data.js — isi database dipegang di memori, dibaca & disimpan ke repo GitHub.
 //
 // Satu file data = seluruh isi database satu aplikasi desktop. Situs ini
@@ -353,6 +354,7 @@ export const catatanPersetujuan = (tabel, id) => web().persetujuan?.[tabel]?.[St
  * membatalkan beserta keputusan sebelumnya — tidak ada yang hilang diam-diam.
  */
 export function batalkan(tabel, id, oleh) {
+  const row=cari(tabel,id);if(row){periksaTulis('batal',tabel,row);if(periodeTerkunci(row.tanggal))throw new Error('Periode dikunci. Gunakan koreksi periode berikutnya.');catatRevisiTambahan(tabel,id,'batalkan persetujuan');}
   setWeb((w) => {
     w.persetujuan[tabel] ||= {};
     const c = w.persetujuan[tabel][String(id)] || {};
@@ -395,6 +397,8 @@ export function tandaiMenunggu(tabel, id) {
 }
 
 export function setujui(tabel, id, oleh) {
+  if(periodeTerkunci(cari(tabel,id)?.tanggal))throw new Error('Periode dikunci. Gunakan koreksi periode berikutnya.');
+  catatRevisiTambahan(tabel,id,'setujui');
   setWeb((w) => {
     w.persetujuan[tabel] ||= {};
     const c = w.persetujuan[tabel][String(id)] || {};
@@ -404,6 +408,8 @@ export function setujui(tabel, id, oleh) {
 
 /** Ditolak = dihapus (masih bisa dipulihkan dari Data terhapus). */
 export function tolak(tabel, id, oleh, alasan = '') {
+  if(periodeTerkunci(cari(tabel,id)?.tanggal))throw new Error('Periode dikunci. Gunakan koreksi periode berikutnya.');
+  catatRevisiTambahan(tabel,id,'tolak');
   setWeb((w) => {
     w.persetujuan[tabel] ||= {};
     const c = w.persetujuan[tabel][String(id)] || {};
@@ -874,11 +880,23 @@ export function tambah(tabel, isi) {
   return r;
 }
 
+export function tambahanTerkunci(tabel,id){
+ const r=cari(tabel,id);if(!r)return false;
+ const perlu=['lembur_transactions','premi_transactions'].includes(tabel)||(tabel==='work_logs'&&(Number(r.premi)>0||Math.max(0,Number(r.hm_akhir||0)-Number(r.hm_awal||0))*Number(cari('operators',r.operator_id)?.tarif_jam||0)>0));
+ return perlu&&disetujui(tabel,id);
+}
+function catatRevisiTambahan(tabel,id,aksi){if(!['lembur_transactions','premi_transactions','work_logs'].includes(tabel))return;const w=web();w.riwayatTambahan||=[];w.riwayatTambahan.push({tabel,id,aksi,oleh:namaPengisi()||'Web',waktu:sekarang(),sebelum:structuredClone(cari(tabel,id)),persetujuan:structuredClone(catatanPersetujuan(tabel,id))});}
+export function hapusTambahanAlat(id){const r=cari('work_logs',id);if(!r)throw new Error('Log tidak ditemukan');periksaTulis('hapus','work_logs',r);if(periodeTerkunci(r.tanggal))throw new Error('Periode dikunci. Gunakan koreksi periode berikutnya.');if(tambahanTerkunci('work_logs',id))throw new Error('Minta kepala divisi membatalkan persetujuan terlebih dahulu.');catatRevisiTambahan('work_logs',id,'hapus tambahan');setWeb(w=>{w.persetujuan.work_logs||={};w.persetujuan.work_logs[String(id)]={...(w.persetujuan.work_logs[String(id)]||{}),status:'dihapus',oleh:namaPengisi()||'Web',waktu:sekarang()};});}
+export function bersihkanSampah(){const n=purgeExpiredTrash(state.data);if(n){web().pembersihanSampah={jumlah:n,waktu:sekarang(),oleh:namaPengisi()||'Admin'};tandaiBerubah();}return n;}
+
 export function ubah(tabel, id, tambalan) {
   const r = cari(tabel, id);
   if (!r) throw new Error('Baris tidak ditemukan.');
+  const tambahan=['lembur_transactions','premi_transactions','work_logs'].includes(tabel),hkOnly=tabel==='work_logs'&&Object.keys(tambalan).every(k=>k==='hk');
+  if(tambahan&&!hkOnly){if(periodeTerkunci(r.tanggal)||periodeTerkunci(tambalan.tanggal))throw new Error('Periode dikunci. Gunakan koreksi periode berikutnya.');if(tambahanTerkunci(tabel,id)&&!(r.deleted_at&&tambalan.deleted_at===null))throw new Error('Transaksi sudah disetujui. Minta kepala divisi membatalkan persetujuan terlebih dahulu sebelum merevisi atau menghapus.');}
   periksaTulis('ubah', tabel, r);            // divisi ASAL
   periksaTulis('ubah', tabel, { ...r, ...tambalan }); // dan divisi tujuan
+  if(tambahan&&!hkOnly)catatRevisiTambahan(tabel,id,'revisi');
   Object.assign(r, tambalan);
   if ('updated_at' in r) r.updated_at = sekarang();
   // Setiap revisi lembur/premi menggugurkan keputusan lama, dari jalur mana
@@ -900,7 +918,9 @@ export function hapus(tabel, id, { lunak = false, aksi = 'hapus' } = {}) {
   const daftar = baris(tabel);
   const i = daftar.findIndex((r) => Number(r.id) === Number(id));
   if (i < 0) throw new Error('Baris tidak ditemukan.');
+  if(['lembur_transactions','premi_transactions','work_logs'].includes(tabel)){if(periodeTerkunci(daftar[i].tanggal))throw new Error('Periode dikunci. Gunakan koreksi periode berikutnya.');if(tambahanTerkunci(tabel,id))throw new Error('Minta kepala divisi membatalkan persetujuan terlebih dahulu sebelum menghapus.');}
   periksaTulis(aksi, tabel, daftar[i]);
+  catatRevisiTambahan(tabel,id,'hapus');
   // Baris master yang masih dipakai transaksi TIDAK boleh dibuang — kalau
   // dibuang, transaksinya tetap ada tapi kehilangan acuannya dan tertulis
   // "(tidak ada)" di laporan. Dijaga di sini, bukan hanya di layar, supaya

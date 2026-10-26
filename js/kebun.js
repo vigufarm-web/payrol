@@ -1,3 +1,4 @@
+import {approvalDateNotice} from './approval-dates.js';
 // kebun.js — pengaturan kebun (kepala, PIN, target biaya), laporan biaya
 // operasional per kebun, dan persetujuan lembur/premi oleh kepala divisi.
 //
@@ -834,6 +835,7 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
   const wadah = el('section');
   const tempat = el('div');
   const sudahPin = new Set();   // divisi yang PIN-nya sudah dimasukkan di sesi ini
+  let focusDate=null;
   const tanggalAcc = new Map(); // cegah acc massal lintas tanggal
 
   const gambarIsi = () => {
@@ -858,6 +860,8 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
     }
 
     kosongkan(tempat);
+    if(focusDate&&!menunggu.some(r=>r.tanggal===focusDate))focusDate=null;
+    tempat.append(approvalDateNotice(menunggu,date=>{focusDate=date;for(const id of perDivisi.keys())tanggalAcc.set(id,date);gambarIsi();},{keyOf:kunciGrupAcc,selected:focusDate}));
     const diputuskan = () => taruh(tempat,
       bagianDiputuskan({ bisaEdit, hak, muatUlang: () => { gambarIsi(); gambar(); } }));
     if (!menunggu.length) {
@@ -891,6 +895,7 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
     };
 
     for (const [divId, daftarAsli] of perDivisi) {
+      if(focusDate&&!daftarAsli.some(r=>r.tanggal===focusDate))continue;
       const semua = kelompokkan(daftarAsli);
       const daftarTanggal = [...new Set(semua.map((r) => r.tanggal))].sort();
       const tanggalDipilih = daftarTanggal.includes(tanggalAcc.get(divId))
@@ -955,7 +960,7 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
           kepala ? el('span.lencana-mode', { teks: `Kepala: ${kepala}` }) : null,
           pilihan(daftarTanggal.map((x) => ({ nilai: x, label: ftanggal(x) })), tanggalDipilih, {
             kosongLabel: null,
-            saatUbah: (ev) => { tanggalAcc.set(divId, ev.target.value); gambarIsi(); },
+            saatUbah: (ev) => { focusDate=ev.target.value;for(const id of perDivisi.keys())tanggalAcc.set(id,focusDate);gambarIsi(); },
           }),
           el('span.status-sinkron', {
             teks: `${daftar.length} tanggal ini · ${rupiahPenuh(nilai)} (total antrean ${semua.length} · ${rupiahPenuh(nilaiSemua)})`,

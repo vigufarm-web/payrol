@@ -1,3 +1,4 @@
+import {payrollWorkers} from './payroll-model.js';
 // laporan.js — halaman laporan: Ringkasan, Payroll per pekerja, dan Rekap
 // biaya per divisi/blok/kegiatan. Semua angka dihitung dari data di memori.
 
@@ -23,8 +24,8 @@ function transaksiPeriode(periode) {
   return {
     hk: hidup('daily_payroll').filter(saring),
     borongan: hidup('borongan_transactions').filter(saring),
-    lembur: hidup('lembur_transactions').filter(saring),
-    premi: hidup('premi_transactions').filter(saring),
+    lembur: hidup('lembur_transactions').filter(r=>saring(r)&&D.disetujui('lembur_transactions',r.id)),
+    premi: hidup('premi_transactions').filter(r=>saring(r)&&D.disetujui('premi_transactions',r.id)),
     kelompok: D.baris('borongan_group').filter((r) => !r.deleted_at && saring(r)),
   };
 }
@@ -36,7 +37,7 @@ function boronganKelompokPerPekerja(kelompok) {
   const peta = new Map();
   const idKelompok = new Set(kelompok.map((g) => Number(g.id)));
   for (const m of D.baris('borongan_group_members')) {
-    if (!idKelompok.has(Number(m.group_id))) continue;
+    if (m.deleted_at || !idKelompok.has(Number(m.group_id))) continue;
     const k = Number(m.employee_id);
     peta.set(k, (peta.get(k) || 0) + (Number(m.nominal) || 0));
   }
@@ -273,43 +274,7 @@ function isiRingkasan(periode) {
 // =====================================================================
 // PAYROLL PER PEKERJA
 // =====================================================================
-function barisPayroll(periode) {
-  const t = transaksiPeriode(periode);
-  const kelompok = boronganKelompokPerPekerja(t.kelompok);
-  const peta = new Map();
-
-  const ambil = (id) => {
-    const k = Number(id);
-    if (!peta.has(k)) {
-      const e = D.cari('employees', k);
-      peta.set(k, {
-        employee_id: k,
-        nik: e?.nik || '',
-        nama: e?.nama || `#${k} (tidak ada)`,
-        bank: e?.bank || '',
-        rekening: e?.rekening || '',
-        hari: new Set(),
-        hk: 0, upah_hk: 0, borongan: 0, lembur: 0, premi: 0,
-      });
-    }
-    return peta.get(k);
-  };
-
-  for (const r of t.hk) {
-    const b = ambil(r.employee_id);
-    b.hk += Number(r.hk) || 0;
-    b.upah_hk += Number(r.nominal) || 0;
-    b.hari.add(r.tanggal);
-  }
-  for (const r of t.borongan) ambil(r.employee_id).borongan += Number(r.nominal) || 0;
-  for (const [id, n] of kelompok) ambil(id).borongan += n;
-  for (const r of t.lembur) ambil(r.employee_id).lembur += Number(r.nominal) || 0;
-  for (const r of t.premi) ambil(r.employee_id).premi += Number(r.nominal) || 0;
-
-  return [...peta.values()]
-    .map((b) => ({ ...b, hari_kerja: b.hari.size, total: b.upah_hk + b.borongan + b.lembur + b.premi }))
-    .sort((a, b) => a.nama.localeCompare(b.nama, 'id'));
-}
+export function barisPayroll(periode) { return payrollWorkers(D.state.data,...periode.rentang()); }
 
 function unduhCsv(namaFile, kolom, data) {
   const bariskan = (nilai) => {
@@ -372,7 +337,7 @@ export function halamanPayroll({ periode }) {
           type: 'button', teks: 'Unduh CSV',
           onclick: () => unduhCsv(
             `Payroll ${periode.judul()}.csv`,
-            [...kolomDasar(), { l: 'Bank', k: 'bank' }, { l: 'No. rekening', k: 'rekening' }],
+            [...kolomDasar().filter(c=>!['bank','rekening'].includes(c.k)), { l: 'Bank', k: 'bank' }, { l: 'No. rekening', k: 'rekening' }],
             data),
         }),
         // rekap gaji resmi (8 lembar) — khusus admin yang pegang semua divisi
@@ -384,7 +349,7 @@ export function halamanPayroll({ periode }) {
       ]),
       el('div.lembar-isi', {}, [
         el('p.bantuan', {
-          teks: 'Upah HK = jumlah (HK × tarif saat dicatat). Borongan sudah termasuk bagian dari borongan kelompok.',
+          teks: 'CSV mengikuti angka tabel ini. Rekap Excel menggabungkan payroll aktif + operator alat, dengan audit subtotal terpisah. Upah HK memakai tarif saat dicatat; borongan kelompok termasuk dan tambahan yang belum disetujui tidak dihitung.',
         }),
         tempat,
       ]),

@@ -1,3 +1,4 @@
+import {operatorPayroll} from './payroll-model.js';
 // laporan-alat.js — laporan bagian Alat Berat & Kendaraan:
 // Ringkasan per unit, Payroll Operator, Biaya per Lokasi, dan
 // Laporan Harian siap tempel ke WhatsApp.
@@ -228,42 +229,7 @@ function isiRingkasanUnit(periode, gambarUlang) {
 // PAYROLL OPERATOR
 // =====================================================================
 export function halamanPayrollOperator({ periode }) {
-  const { log } = dataPeriode(periode);
-  const per = new Map();
-
-  for (const r of log) {
-    const k = Number(r.operator_id);
-    if (!per.has(k)) {
-      const o = D.cari('operators', k);
-      per.set(k, {
-        nama: o?.nama || `#${k} (tidak ada)`,
-        bank: o?.bank || '',
-        rekening: o?.no_rekening || '',
-        tarif_harian: Number(o?.tarif_harian) || 0,
-        tarif_jam: Number(o?.tarif_jam) || 0,
-        hari: new Set(), hk: 0, jam_hm: 0, km: 0, premi: 0,
-      });
-    }
-    const b = per.get(k);
-    const tambahanSah = D.disetujui('work_logs', r.id);
-    b.hari.add(r.tanggal);
-    b.hk += Number(r.hk) || 0;
-    if (tambahanSah) b.jam_hm += hmPakai(r);
-    b.km += kmPakai(r);
-    if (tambahanSah) b.premi += Number(r.premi) || 0;
-  }
-
-  const data = [...per.values()].map((b) => {
-    const upah_harian = b.hk * b.tarif_harian;
-    const upah_jam = b.jam_hm * b.tarif_jam;
-    return {
-      ...b,
-      hari_kerja: b.hari.size,
-      upah_harian,
-      upah_jam,
-      total: upah_harian + upah_jam + b.premi,
-    };
-  }).sort((a, b) => a.nama.localeCompare(b.nama, 'id'));
+  const data=operatorPayroll(D.state.data,...periode.rentang());
 
   let tampilRekening = false;
   const tempat = el('div');
