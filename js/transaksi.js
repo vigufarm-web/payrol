@@ -1,3 +1,4 @@
+import {overtimeCheckPanel} from './overtime-check.js';
 import {explainApproval} from './approval-editor.js';
 import {mandorHKPanel} from './mandor-hk.js';
 // transaksi.js — halaman input: HK harian (satuan & massal), borongan,
@@ -1464,7 +1465,8 @@ export function halamanHK({ periode, gambar, bisaEdit, hkLoad }) {
 
   const tempat = el('div');
   const hkMandor=mandorHKPanel(()=>tgl,{load:hkLoad});
-  wadah.append(hkMandor.box);
+  const lemburAdmin=overtimeCheckPanel();
+  wadah.append(hkMandor.box,lemburAdmin.box);
   let kataCariHk = '';
   const inCariHk = el('input.pencarian-input', {
     type: 'search', placeholder: 'Nama, NIK, blok, kegiatan, atau keterangan lembur…',
@@ -1479,6 +1481,7 @@ export function halamanHK({ periode, gambar, bisaEdit, hkLoad }) {
 
   const gambarIsi = () => {
     hkMandor.refresh();
+    lemburAdmin.refresh(tgl);
     const data = saringDivisi(hidup('daily_payroll'))
       .filter((r) => r.tanggal === tgl)
       .sort((x, y) => D.labelRef('employees', x.employee_id)
