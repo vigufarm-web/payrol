@@ -1,5 +1,6 @@
 import {budgetMix} from './budget-mix.js';
 import {approvalDateNotice} from './approval-dates.js';
+import {approvalSelection} from './approval-date-selection.js';
 // kebun.js — pengaturan kebun (kepala, PIN, target biaya), laporan biaya
 // operasional per kebun, dan persetujuan lembur/premi oleh kepala divisi.
 //
@@ -879,8 +880,9 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
   const wadah = el('section');
   const tempat = el('div');
   const sudahPin = new Set();   // divisi yang PIN-nya sudah dimasukkan di sesi ini
-  let focusDate=null;
-  const tanggalAcc = new Map(); // cegah acc massal lintas tanggal
+  const dateState=approvalSelection(D.state.data,'payroll:'+JSON.stringify(divisiBoleh()));
+  let focusDate=dateState.selected||null;
+  const tanggalAcc = dateState.perDivision; // cegah acc massal lintas tanggal
 
   const gambarIsi = () => {
     const menunggu = [];
@@ -904,10 +906,13 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
     }
 
     kosongkan(tempat);
-    if(focusDate&&!menunggu.some(r=>r.tanggal===focusDate))focusDate=null;
-    tempat.append(approvalDateNotice(menunggu,date=>{focusDate=date;for(const id of perDivisi.keys())tanggalAcc.set(id,date);gambarIsi();},{keyOf:kunciGrupAcc,selected:focusDate}));
+    tempat.append(approvalDateNotice(menunggu,date=>{focusDate=date;dateState.selected=date;for(const id of perDivisi.keys())tanggalAcc.set(id,date);gambarIsi();},{keyOf:kunciGrupAcc,selected:focusDate}));
     const diputuskan = () => taruh(tempat,
       bagianDiputuskan({ bisaEdit, hak, muatUlang: () => { gambarIsi(); gambar(); } }));
+    if(focusDate&&!menunggu.some(r=>r.tanggal===focusDate)){
+      tempat.append(el('div.lembar',{},[el('div.lembar-kepala',{},[el('h2',{teks:'Persetujuan · '+ftanggal(focusDate)})]),el('div.lembar-isi',{},[el('p',{teks:'Tidak ada lembur atau premi yang menunggu pada tanggal ini. Tanggal tetap dipertahankan; pilih tanggal lain melalui tombol di atas.'})])]));
+      diputuskan();return;
+    }
     if (!menunggu.length) {
       tempat.append(el('div.lembar', {}, [
         el('div.lembar-kepala', {}, [el('h2', { teks: 'Tidak ada yang menunggu' })]),
@@ -942,8 +947,8 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
       if(focusDate&&!daftarAsli.some(r=>r.tanggal===focusDate))continue;
       const semua = kelompokkan(daftarAsli);
       const daftarTanggal = [...new Set(semua.map((r) => r.tanggal))].sort();
-      const tanggalDipilih = daftarTanggal.includes(tanggalAcc.get(divId))
-        ? tanggalAcc.get(divId) : daftarTanggal[0];
+      const tanggalDipilih = focusDate || (daftarTanggal.includes(tanggalAcc.get(divId))
+        ? tanggalAcc.get(divId) : daftarTanggal[0]);
       tanggalAcc.set(divId, tanggalDipilih);
       const daftar = semua.filter((r) => r.tanggal === tanggalDipilih);
       const divisi = divId ? D.labelRef('divisions', divId) : '(tanpa divisi)';
@@ -987,6 +992,7 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
             { ya: 'Setujui tanggal ini' });
           if (!lanjut) return;
         }
+        focusDate=tanggalDipilih;dateState.selected=tanggalDipilih;tanggalAcc.set(divId,tanggalDipilih);
         for (const r of daftarPutus) {
           if (setuju) D.setujui(r._tabel, r.id, kepala || D.namaPengisi() || 'Kepala kebun');
           else D.tolak(r._tabel, r.id, kepala || D.namaPengisi() || 'Kepala kebun', alasan);
@@ -1004,7 +1010,7 @@ export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
           kepala ? el('span.lencana-mode', { teks: `Kepala: ${kepala}` }) : null,
           pilihan(daftarTanggal.map((x) => ({ nilai: x, label: ftanggal(x) })), tanggalDipilih, {
             kosongLabel: null,
-            saatUbah: (ev) => { focusDate=ev.target.value;for(const id of perDivisi.keys())tanggalAcc.set(id,focusDate);gambarIsi(); },
+            saatUbah: (ev) => { focusDate=ev.target.value;dateState.selected=focusDate;for(const id of perDivisi.keys())tanggalAcc.set(id,focusDate);gambarIsi(); },
           }),
           el('span.status-sinkron', {
             teks: `${daftar.length} tanggal ini · ${rupiahPenuh(nilai)} (total antrean ${semua.length} · ${rupiahPenuh(nilaiSemua)})`,

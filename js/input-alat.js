@@ -1,4 +1,5 @@
 import {approvalDateNotice} from './approval-dates.js';
+import {approvalSelection,approvalDateOptions} from './approval-date-selection.js';
 import {explainApproval} from './approval-editor.js';
 // input-alat.js — halaman input bagian Alat Berat & Kendaraan:
 // Log Harian (HM/KM/ritase), Isi Solar, dan Servis Unit.
@@ -999,7 +1000,8 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
   const bolehBatal = hak?.batal || (() => false);
   const wadah = el('section');
   const tempat = el('div');
-  let tanggalAcc = '';
+  const dateState=approvalSelection(D.state.data,'alb');
+  let tanggalAcc = dateState.selected||'';
 
   const gambarIsi = () => {
     kosongkan(tempat);
@@ -1007,15 +1009,18 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
       .filter((r) => !r.deleted_at && D.menungguPersetujuan('work_logs', r.id)
         && nilaiPersetujuanAlat(r).total > 0)
       .sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
-    const daftarTanggal = [...new Set(menunggu.map((r) => r.tanggal))].sort();
-    if (!daftarTanggal.includes(tanggalAcc)) tanggalAcc = daftarTanggal[0] || '';
+    const pendingTanggal = [...new Set(menunggu.map((r) => r.tanggal))].sort();
+    if (!tanggalAcc)tanggalAcc=pendingTanggal[0]||'';dateState.selected=tanggalAcc;
+    const daftarTanggal=approvalDateOptions(pendingTanggal,tanggalAcc);
     const menungguTanggal = menunggu.filter((r) => r.tanggal === tanggalAcc);
-    tempat.append(approvalDateNotice(menunggu,date=>{tanggalAcc=date;gambarIsi();},{selected:tanggalAcc}));
+    tempat.append(approvalDateNotice(menunggu,date=>{tanggalAcc=date;dateState.selected=date;gambarIsi();},{selected:tanggalAcc}));
+    if(tanggalAcc)tempat.append(el('p',{teks:'Tanggal dipilih: '+ftanggal(tanggalAcc)}));
 
     const putuskan = async (baris, setuju) => {
       if (!bisaEdit()) { pesan('Aktifkan mode edit dulu.', 'awas', 6); return; }
       if (!bolehSetuju()) { pesan('Anda tidak diberi hak menyetujui.', 'awas', 6); return; }
-      const daftarPutus = baris ? [baris] : menungguTanggal;
+      const daftarPutus = baris ? [baris] : menungguTanggal;if(!daftarPutus.length)return;
+      dateState.selected=tanggalAcc;
       let alasan = '';
       if (!setuju) {
         alasan = await mintaTeks(
@@ -1051,11 +1056,11 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
           el('h2', { teks: `Tambahan menunggu — ${menunggu.length} total` }),
           pilihan(daftarTanggal.map((x) => ({ nilai: x, label: ftanggal(x) })), tanggalAcc, {
             kosongLabel: null,
-            saatUbah: (ev) => { tanggalAcc = ev.target.value; gambarIsi(); },
+            saatUbah: (ev) => { tanggalAcc = ev.target.value;dateState.selected=tanggalAcc; gambarIsi(); },
           }),
           el('span.status-sinkron', { teks: `${menungguTanggal.length} tanggal ini · tambahan ${rupiahPenuh(nilai)}` }),
-          el('button.tombol-samar.tombol-kecil', { type: 'button', teks: 'Tolak tanggal ini', onclick: () => putuskan(null, false) }),
-          el('button.tombol-utama.tombol-kecil', { type: 'button', teks: 'Setujui tanggal ini', onclick: () => putuskan(null, true) }),
+          el('button.tombol-samar.tombol-kecil', { type: 'button', teks: 'Tolak tanggal ini', disabled:!menungguTanggal.length, onclick: () => putuskan(null, false) }),
+          el('button.tombol-utama.tombol-kecil', { type: 'button', teks: 'Setujui tanggal ini', disabled:!menungguTanggal.length, onclick: () => putuskan(null, true) }),
         ]),
         el('div.lembar-isi', {}, [
           tabel([
@@ -1078,7 +1083,7 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
               el('button.tombol-kecil.tombol-samar', { type: 'button', teks: 'Tolak',
                 onclick: (ev) => { ev.stopPropagation(); putuskan(r, false); } }),
             ]) },
-          ], menungguTanggal, { kosong: '—' }),
+          ], menungguTanggal, { kosong: 'Tidak ada tambahan menunggu pada tanggal ini. Pilih tanggal lain jika ingin melanjutkan.' }),
         ]),
       ]));
     }
