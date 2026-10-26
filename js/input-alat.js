@@ -1,3 +1,5 @@
+import {approvalDateNotice} from './approval-dates.js';
+import {explainApproval} from './approval-editor.js';
 // input-alat.js — halaman input bagian Alat Berat & Kendaraan:
 // Log Harian (HM/KM/ritase), Isi Solar, dan Servis Unit.
 //
@@ -165,10 +167,6 @@ function formLog(barisAda, tglAwal, saatSelesai) {
   if (!barisAda) {
     pasangPilihanCepat(inUnit, referensiSering('work_logs', 'unit_id', opsiUnit()), {
       judul: 'Unit terakhir & sering dipakai',
-    });
-    pasangPilihanCepat(inOperator, referensiSering('work_logs', 'operator_id', opsiOperator()), {
-      judul: 'Operator terakhir & sering dipakai',
-      saatPilih: (id) => { inOperator.setNilai(id); aturTotalHk(); },
     });
   }
 
@@ -532,7 +530,9 @@ function formLog(barisAda, tglAwal, saatSelesai) {
     el('button.tombol-samar', { type: 'button', teks: 'Batal', onclick: () => p.tutup() }),
     el('button.tombol-utama', { type: 'button', teks: 'Simpan', onclick: simpan }),
   );
+  if(barisAda)aksi.unshift(el('button.tombol-bahaya.tombol-kecil',{type:'button',teks:'Hapus tambahan saja',onclick:async()=>{if(!await tanya('Hapus lembur/premi tambahan?', 'HK dan log operasi tetap disimpan. Tambahan tidak ikut dibayar.',{ya:'Hapus tambahan',tidak:'Batal'}))return;try{D.hapusTambahanAlat(barisAda.id);p.tutup();saatSelesai();pesan('Tambahan dihapus; HK dan operasi tetap tersimpan.','sukses');}catch(e){pesan(e.message,'galat');}}}));
   const p = panel(barisAda ? 'Ubah log harian' : 'Tambah log harian', badan, aksi);
+  explainApproval(p,'work_logs',barisAda);
   inResetMeter.addEventListener('change', aturReset);
   aturReset();
 }
@@ -588,6 +588,7 @@ export function halamanLogHarian({ periode, gambar, bisaEdit }) {
       { l: 'Status tambahan', nilai: (r) => {
         const status = D.catatanPersetujuan('work_logs', r.id)?.status;
         if (status === 'menunggu') return el('span.chip.chip-tunggu', { teks: 'Premi/lembur menunggu' });
+        if(status==='dihapus')return el('span.chip',{teks:'Tambahan dihapus; HK tetap'});
         if (status === 'ditolak') return el('span.chip', { teks: 'Premi/lembur ditolak' });
         return el('span.chip.chip-ok', { teks: status === 'disetujui' ? 'Tambahan disetujui' : 'Tanpa tambahan' });
       } },
@@ -629,9 +630,6 @@ function formSolar(barisAda, saatSelesai) {
   if (!barisAda) {
     pasangPilihanCepat(inUnit, referensiSering(['fuel_logs', 'work_logs'], 'unit_id', opsiUnit()), {
       judul: 'Unit terakhir & sering dipakai',
-    });
-    pasangPilihanCepat(inOperator, referensiSering(['fuel_logs', 'work_logs'], 'operator_id', opsiOperator()), {
-      judul: 'Operator terakhir & sering dipakai',
     });
   }
   const inLiter = el('input', { type: 'number', step: '0.1', min: '0', nilai: barisAda?.liter ?? '' });
@@ -988,6 +986,14 @@ export const nilaiPersetujuanAlat = (r) => {
   return { upahJam, premi, total: upahJam + premi };
 };
 
+export function rincianPersetujuanAlat(r) {
+  const o=D.cari('operators',r.operator_id),t=tarifPremiUnit(r.unit_id),n=nilaiPersetujuanAlat(r),bagian=[];
+  if(t.hm)bagian.push(`${angka(hmPakai(r),2)} HM × ${rupiahPenuh(t.hm)}`);
+  if(t.km)bagian.push(`${angka(kmPakai(r),2)} KM × ${rupiahPenuh(t.km)}`);
+  if(t.rit)bagian.push(`${angka(Number(r.ritase)||0,2)} rit × ${rupiahPenuh(t.rit)}`);
+  return `Upah jam: ${angka(hmPakai(r),2)} HM × ${rupiahPenuh(Number(o?.tarif_jam)||0)} = ${rupiahPenuh(n.upahJam)}. Premi tercatat ${rupiahPenuh(n.premi)}. ${bagian.length?'Acuan tarif premi saat ini: '+bagian.join(' + ')+'. Nilai tercatat tetap dipakai.':'Dasar tarif tidak tersimpan; nilai premi tercatat tidak dihitung ulang.'}${r.catatan||r.keterangan?' Catatan: '+(r.catatan||r.keterangan):''}`;
+}
+
 export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
   const bolehSetuju = hak?.setuju || (() => true);
   const bolehBatal = hak?.batal || (() => false);
@@ -1004,6 +1010,7 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
     const daftarTanggal = [...new Set(menunggu.map((r) => r.tanggal))].sort();
     if (!daftarTanggal.includes(tanggalAcc)) tanggalAcc = daftarTanggal[0] || '';
     const menungguTanggal = menunggu.filter((r) => r.tanggal === tanggalAcc);
+    tempat.append(approvalDateNotice(menunggu,date=>{tanggalAcc=date;gambarIsi();},{selected:tanggalAcc}));
 
     const putuskan = async (baris, setuju) => {
       if (!bisaEdit()) { pesan('Aktifkan mode edit dulu.', 'awas', 6); return; }
@@ -1055,6 +1062,9 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
             { l: 'Tanggal', nilai: (r) => ftanggal(r.tanggal) },
             { l: 'Unit', nilai: (r) => D.labelRef('units', r.unit_id) },
             { l: 'Operator', nilai: (r) => D.labelRef('operators', r.operator_id) },
+            { l: 'Kegiatan / lokasi', nilai: (r) => [r.kegiatan,r.lokasi].filter(Boolean).join(' · ') || '—' },
+            { l: 'Ritase', k: 'ritase', jenis: 'angka' },
+            { l: 'Dasar lembur & premi', nilai:r=>el('details',{},[el('summary',{teks:'Lihat perhitungan'}),el('p',{style:'min-width:18rem;white-space:normal',teks:rincianPersetujuanAlat(r)})]) },
             { l: 'HK (langsung)', k: 'hk', jenis: 'hk', total: true },
             { l: 'HM', nilai: hmPakai, jenis: 'angka', pecahan: 1 },
             { l: 'KM', nilai: kmPakai, jenis: 'angka', pecahan: 1 },
@@ -1090,6 +1100,9 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
             { l: 'Tanggal', nilai: (r) => ftanggal(r.tanggal) },
             { l: 'Unit', nilai: (r) => D.labelRef('units', r.unit_id) },
             { l: 'Operator', nilai: (r) => D.labelRef('operators', r.operator_id) },
+            { l: 'Kegiatan / lokasi', nilai: (r) => [r.kegiatan,r.lokasi].filter(Boolean).join(' · ') || '—' },
+            { l: 'Ritase', k: 'ritase', jenis: 'angka' },
+            { l: 'Dasar lembur & premi', nilai:r=>el('details',{},[el('summary',{teks:'Lihat perhitungan'}),el('p',{style:'min-width:18rem;white-space:normal',teks:rincianPersetujuanAlat(r)})]) },
             { l: 'HK (langsung)', k: 'hk', jenis: 'hk' },
             { l: 'Upah jam/lembur (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).upahJam, jenis: 'uang' },
             { l: 'Premi (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).premi, jenis: 'uang' },

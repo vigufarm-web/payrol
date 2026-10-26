@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {pendingDates} from '../js/approval-dates.js';
+test('date notice only lists waiting dates and counts split work as one approval request',()=>{const rows=[{id:1,tanggal:'2026-10-23',group:'A'},{id:2,tanggal:'2026-10-23',group:'A'},{id:3,tanggal:'2026-10-24',group:'B'}];assert.deepEqual(pendingDates(rows,r=>r.group),[{date:'2026-10-23',count:1},{date:'2026-10-24',count:1}]);assert.deepEqual(pendingDates([]),[]);});

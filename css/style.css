@@ -569,3 +569,13 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Keep one block card visible when the input panel has many grid rows. */
 .panel-isi .daftar-pilihan { min-height: 4.5rem; align-content: start; }
+
+/* Input lists retain usable height even inside the panel grid. */
+.panel-isi .daftar-pilihan.daftar-blok-hk,.panel-isi .daftar-pilihan.daftar-pekerja{height:18rem;min-height:18rem;max-height:18rem;align-content:start;grid-auto-rows:min-content}
+.panel-isi .alat-pilihan input,.panel-isi input[type=search]{width:100%;min-height:44px;padding:.65rem .8rem;font:inherit;border:1px solid var(--garis);border-radius:8px;box-sizing:border-box}
+.panel-isi .daftar-pilihan .kartu-pilihan{min-height:3.5rem}
+@media(max-width:640px){.panel-isi .daftar-pilihan.daftar-blok-hk,.panel-isi .daftar-pilihan.daftar-pekerja{height:16rem;min-height:16rem;max-height:16rem}}
+
+.mandor-hk-box:empty{display:none}.mandor-hk-box{padding:14px;margin:12px 0;border:1px solid #c9d9c5;border-left:4px solid #3e6a43;border-radius:10px;background:#f4f8ef}.mandor-hk-box>button{margin-left:12px}.mandor-hk-box p{margin:.6rem 0}.mandor-hk-box small{display:block;color:var(--tinta-samar)}
+
+.approval-date-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.approval-date-buttons .aktif{background:var(--hijau-tua);color:#fff}.approval-date-notice{margin-bottom:14px}

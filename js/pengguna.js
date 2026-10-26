@@ -274,8 +274,8 @@ function penjaga(aksi, tabelNama, isi) {
     return `${p.nama} tidak punya hak mengubah master data.`;
   }
 
-  const perlu = aksi === 'tambah' ? 'input' : aksi === 'tolak' ? 'setuju' : 'revisi';
-  const labelAksi = { tambah: 'menginput', ubah: 'merevisi', hapus: 'menghapus', tolak: 'menolak' }[aksi];
+  const perlu = aksi === 'tambah' ? 'input' : aksi === 'tolak' ? 'setuju' : aksi==='batal'?'batal':'revisi';
+  const labelAksi = { tambah: 'menginput', ubah: 'merevisi', hapus: 'menghapus', tolak: 'menolak', batal:'membatalkan persetujuan' }[aksi];
   if (!punyaHak(perlu)) return `${p.nama} tidak punya hak ${labelAksi}.`;
 
   const div = isi?.division_id;
