@@ -1,3 +1,4 @@
+import {extraStatusRows,extraStatusDetails} from './extra-status.js';
 import * as D from './data.js';
 import * as P from './pengguna.js';
 import {el,kosongkan,tabel,tanggal} from './ui.js';
@@ -37,6 +38,6 @@ export function overtimeCheckPanel(){
    {l:'Lembur input (Rp)',k:'overtime',jenis:'uang',total:true},
    {l:'Premi input (Rp)',k:'premium',jenis:'uang',total:true},
    {l:'Total simulasi (Rp)',k:'total',jenis:'uang',total:true},
-  ],rows,{kosong:'Belum ada input pada tanggal ini.'}),el('small',{teks:'Simulasi seluruh input HK, lembur dan premi pada tanggal ini, termasuk belum ACC dan ditolak; bukan nilai pembayaran. Tidak mengikuti pencarian nama. Hanya divisi yang dapat Anda akses. Borongan dan HK operator alat terpisah. Aturan ACC dan nominal Excel tetap berlaku; simpan perubahan ke GitHub setelah selesai.'}));
+  ],rows,{kosong:'Belum ada input pada tanggal ini.'}),el('small',{teks:'Simulasi seluruh input HK, lembur dan premi pada tanggal ini, termasuk belum ACC; bukan nilai pembayaran. Pengajuan ditolak yang masuk Data terhapus ditampilkan pada rincian status dan tidak ikut total input aktif. Tidak mengikuti pencarian nama. Hanya divisi yang dapat Anda akses. Borongan dan HK operator alat terpisah. Aturan ACC dan nominal Excel tetap berlaku; simpan perubahan ke GitHub setelah selesai.'}),extraStatusDetails(extraStatusRows(D.state.data,{date,allowed:P.divisiBoleh()})));
  }};
 }

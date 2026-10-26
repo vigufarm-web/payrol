@@ -579,3 +579,5 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .mandor-hk-box:empty{display:none}.mandor-hk-box{padding:14px;margin:12px 0;border:1px solid #c9d9c5;border-left:4px solid #3e6a43;border-radius:10px;background:#f4f8ef}.mandor-hk-box>button{margin-left:12px}.mandor-hk-box p{margin:.6rem 0}.mandor-hk-box small{display:block;color:var(--tinta-samar)}
 
 .approval-date-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.approval-date-buttons .aktif{background:var(--hijau-tua);color:#fff}.approval-date-notice{margin-bottom:14px}
+
+.status-extra-details{margin:1rem 0}.status-extra-details>summary{cursor:pointer;padding:.75rem 0;font-weight:600}.status-extra-details small{display:block}.rincian-tambahan small{display:block;color:var(--merah,#a83425)}
