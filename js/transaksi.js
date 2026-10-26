@@ -936,13 +936,14 @@ function formHK(barisAda, tgl, saatSelesai) {
             && Number(x.employee_id) === Number(barisAda.employee_id)
             && x.tanggal === barisAda.tanggal);
           if (!sisaHk) {
-            const terkait = [];
+            let terkait = [];
             for (const [tb, label] of [['lembur_transactions', 'Lembur'], ['premi_transactions', 'Premi']]) {
             for (const r of saringDivisi(D.baris(tb))) {
                 if (!r.deleted_at && Number(r.employee_id) === Number(barisAda.employee_id)
                   && r.tanggal === barisAda.tanggal) terkait.push({ tb, r, label });
               }
             }
+            const sudahAcc=terkait.filter(t=>D.tambahanTerkunci(t.tb,t.r.id));if(sudahAcc.length)await tanya('Tambahan yang disetujui tetap disimpan','HK dihapus, tetapi '+sudahAcc.length+' lembur/premi sudah disetujui. Minta kepala divisi membatalkan persetujuan dahulu untuk menghapus tambahan tersebut.',{ya:'Mengerti',tidak:'Tutup'});terkait=terkait.filter(t=>!D.tambahanTerkunci(t.tb,t.r.id));
             if (terkait.length && await tanya('Ikut hapus lembur/preminya?', el('div', {}, [
               el('p', { teks: `${D.labelRef('employees', barisAda.employee_id)} tidak punya HK lagi `
                 + `pada ${ftanggal(barisAda.tanggal)}, tapi masih tercatat:` }),
