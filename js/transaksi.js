@@ -1,3 +1,4 @@
+import {extraStatusRows,extraStatusDetails} from './extra-status.js';
 import {overtimeCheckPanel} from './overtime-check.js';
 import {explainApproval} from './approval-editor.js';
 import {mandorHKPanel} from './mandor-hk.js';
@@ -1491,7 +1492,7 @@ export function halamanHK({ periode, gambar, bisaEdit, hkLoad }) {
     // kelihatan dari daftar HK (ditampilkan di baris pertama tiap pekerja)
     const tambahan = new Map();   // employee_id -> { teks, menunggu }
     for (const [tabelT, kode] of [['lembur_transactions', 'L'], ['premi_transactions', 'P']]) {
-      for (const r of saringDivisi(hidup(tabelT))) {
+      for (const r of saringDivisi(D.baris(tabelT).filter(r=>!r.deleted_at||D.catatanPersetujuan(tabelT,r.id)?.status==='ditolak'))) {
         if (r.tanggal !== tgl) continue;
         const k = Number(r.employee_id);
         if (!tambahan.has(k)) tambahan.set(k, { per: new Map(), rincian: new Map(), jumlah: 0 });
@@ -1503,9 +1504,10 @@ export function halamanHK({ periode, gambar, bisaEdit, hkLoad }) {
         t.per.set(kode, (t.per.get(kode) || 0) + n);
         const status = statusPersetujuan(tabelT, r.id);
         const keterangan = r.catatan || r.keterangan_manual || 'Tanpa keterangan';
-        const kunci = `${kode}|${keterangan}|${status.label}`;
+        const decision=D.catatanPersetujuan(tabelT,r.id);
+        const kunci = `${kode}|${keterangan}|${status.label}|${decision?.alasan||''}|${decision?.oleh||''}`;
         const rinci = t.rincian.get(kunci) || {
-          kode, keterangan, status, nominal: 0,
+          kode, keterangan, status, decision, nominal: 0,
         };
         rinci.nominal += n;
         t.rincian.set(kunci, rinci);
@@ -1532,6 +1534,7 @@ export function halamanHK({ periode, gambar, bisaEdit, hkLoad }) {
         el('strong', { teks: x.kode === 'L' ? 'Lembur: ' : 'Premi: ' }),
         `${x.keterangan} · ${rupiahPenuh(x.nominal)} `,
         el(`span.chip.${x.status.kelas}`, { teks: `${x.status.ikon} ${x.status.label}` }),
+        x.decision?.alasan?el('small',{teks:'Alasan: '+x.decision.alasan}):null,
       ])));
     };
 
@@ -1888,6 +1891,8 @@ export function halamanBorongan({ periode, gambar, bisaEdit }) {
 
 export function halamanLemburPremi({ periode, gambar, bisaEdit }) {
   const wadah = el('section');
+  const [statusFrom,statusTo]=periode.rentang();
+  wadah.append(extraStatusDetails(extraStatusRows(D.state.data,{from:statusFrom,to:statusTo,allowed:P.divisiBoleh()})));
   if (!bisaEdit()) wadah.append(panelKosong('Mode lihat. Masukkan token GitHub di Pengaturan untuk bisa input data.'));
   wadah.append(
     lembarTransaksi('lembur_transactions', 'Lembur', 'LM', periode, gambar, bisaEdit),
