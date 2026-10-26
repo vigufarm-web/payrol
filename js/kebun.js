@@ -1,3 +1,4 @@
+import {budgetMix} from './budget-mix.js';
 import {approvalDateNotice} from './approval-dates.js';
 // kebun.js — pengaturan kebun (kepala, PIN, target biaya), laporan biaya
 // operasional per kebun, dan persetujuan lembur/premi oleh kepala divisi.
@@ -206,6 +207,7 @@ export function rekomendasiAnggaran(b, target, dari, sampai, tanggalAcuan = null
     hariTotal, hariJalan, hariSisa,
     tanggalAcuan: kini,
     sisaRp, biayaPerHk, rpPerHari, hkPerHari, proyeksi, jatahRp, jatahHk,
+    mix: Array.isArray(b.hk) ? budgetMix(b, sisaRp, hariSisa) : null,
     selesai: hariSisa <= 0,
     belumMulai: hariJalan === 0,
     lewat: sisaRp < 0,
@@ -251,14 +253,14 @@ export function kotakRekomendasi(k, target) {
       }));
     }
     if (k.jatahRp != null) {
-      const hk = k.jatahHk != null
+      const hk = !k.mix && k.jatahHk != null
         ? ` — kira-kira ${fhk(k.jatahHk)} HK per hari`
         : '';
       baris.push(el('p.rekomendasi-utama', {
         teks: `Supaya tidak lewat target: sisa ${k.hariSisa} hari × maksimal `
           + `${rupiahPenuh(k.jatahRp)} per hari${hk}.`,
       }));
-      if (k.jatahHk != null && k.hkPerHari > 0) {
+      if (!k.mix && k.jatahHk != null && k.hkPerHari > 0) {
         const beda = k.jatahHk - k.hkPerHari;
         baris.push(el('p.bantuan', {
           teks: beda < 0
@@ -269,15 +271,43 @@ export function kotakRekomendasi(k, target) {
     }
   }
 
-  baris.push(el('p.bantuan', {
-    teks: 'Angka ini rata-rata lurus, bukan ramalan: hitungannya menganggap sisa anggaran '
-      + 'dipakai untuk HK harian. Kalau masih ada rencana borongan, solar, atau servis, '
-      + 'jatah HK-nya lebih kecil dari itu.'
-      + (k.biayaPerHk ? ` Biaya rata-rata ${rupiahPenuh(k.biayaPerHk)} per HK.` : '')
-      + (k.jatahHk != null
-        ? ` Batas 1 HK per orang per hari tetap berlaku, jadi ${fhk(k.jatahHk)} HK/hari`
-          + ` artinya kira-kira ${Math.max(1, Math.round(k.jatahHk))} orang kerja penuh.`
-        : ''),
+  if (k.mix) {
+    const m = k.mix;
+    if (!k.selesai) {
+      baris.push(el('p', { teks: `Cadangan tambahan menunggu persetujuan ${rupiahPenuh(m.pending)}. `
+        + `Sisa untuk kegiatan berikutnya ${rupiahPenuh(m.available)}.` }));
+      if (m.shortage > 0) baris.push(el('p.rekomendasi-awas', {
+        teks: `Jika seluruh tambahan menunggu disetujui, anggaran kurang ${rupiahPenuh(m.shortage)}.` }));
+      if (m.valid) {
+        baris.push(el('p.rekomendasi-utama', { teks: `Simulasi sisa ${k.hariSisa} hari: `
+          + `${fhk(m.hk)} HK total, sekitar ${fhk(m.hkPerDay)} HK per hari, `
+          + `setelah menyediakan bagian premi, lembur, dan borongan.` }));
+        baris.push(tabel([
+          { l: 'Alokasi kegiatan berikutnya', k: 'label' },
+          { l: 'Sisa periode (Rp)', k: 'amount', jenis: 'uang', total: true },
+          { l: 'Per hari (Rp)', k: 'perDay', jenis: 'uang', total: true },
+        ], m.allocations));
+        if (m.unallocated > 0.01) baris.push(el('p.bantuan', { teks: `Ruang anggaran belum dialokasikan ${rupiahPenuh(m.unallocated)} karena batas 1 HK per pekerja aktif per hari. Tidak otomatis dialihkan ke premi/lembur.` }));
+        baris.push(tabel([
+          { l: 'Tarif aktual / HK (Rp)', k: 'rate', jenis: 'uang' },
+          { l: 'Pekerja tercatat', k: 'employees', jenis: 'angka' },
+          { l: 'Estimasi HK sisa', k: 'hk', jenis: 'hk', total: true },
+          { l: 'HK per hari', k: 'hkPerDay', jenis: 'hk', total: true },
+        ], m.groups));
+        baris.push(el('details', {}, [el('summary', { teks: 'Dasar perhitungan simulasi' }), el('p.bantuan', { teks: `Tarif ditimbang dari upah dan HK yang benar-benar tercatat `
+          + `pada divisi dan periode ini, rata-rata ${rupiahPenuh(m.rate)} / HK. `
+          + 'Pekerja tanpa transaksi periode ini tidak diikutkan; tarif mandor mengikuti transaksi, tanpa disamaratakan. '
+          + 'Pembagian sisa mengikuti komposisi biaya tercatat termasuk tambahan menunggu sebagai asumsi cadangan. '
+          + 'Ini simulasi batas anggaran, bukan kewajiban menghabiskan premi/lembur atau penetapan jadwal pekerja. '
+          + 'Maksimal 1 HK per orang per hari; sesuaikan komposisi tim dan pekerjaan nyata. '
+          + 'Biaya baru di luar pola ini mengurangi ruang anggaran.' })]));
+      } else if (m.invalid) baris.push(el('p.bantuan', { teks: 'Estimasi HK belum dapat dihitung: ada transaksi HK atau nominal upah yang tidak valid. Perbaiki input dahulu; tarif tidak ditebak.' }));
+      else baris.push(el('p.bantuan', { teks: 'Belum ada dasar transaksi HK yang cukup pada periode ini untuk memperkirakan komposisi tarif dan tambahan. Tarif tidak ditebak.' }));
+    }
+  } else baris.push(el('p.bantuan', {
+    teks: 'Proyeksi mengikuti laju biaya tercatat. Estimasi HK memakai rata-rata upah HK; '
+      + 'rencana tambahan premi, lembur, borongan atau biaya lain akan mengurangi jatah HK.'
+      + (k.biayaPerHk ? ` Biaya rata-rata ${rupiahPenuh(k.biayaPerHk)} per HK.` : ''),
   }));
 
   return el('div.rekomendasi', {}, [
@@ -399,6 +429,17 @@ export function halamanLaporanKebun({ periode, gambar, hak }) {
           kotak('Hari ada kegiatan', angka(b.hari.size), 'hari'),
           kotakInput(b.inputTerakhir),
         ]),
+      ]),
+
+      el('div.lembar', {}, [
+        el('div.lembar-kepala', {}, [el('h2', { teks: 'Komposisi biaya periode' })]),
+        el('dl.angka-utama', {}, [
+          ...[['Gapok / upah HK', b.upahHk], ['Premi disetujui', b.upahPremi],
+            ['Lembur disetujui', b.upahLembur], ['Borongan', b.upahBorongan]]
+            .map(([label, value]) => kotak(label,
+              b.total > 0 ? angka(value / b.total * 100, 1) + '%' : '—', rupiahPenuh(value))),
+        ]),
+        el('div.lembar-isi', {}, [el('p.bantuan', { teks: 'Persentase dari total biaya periode terpilih. Tambahan menunggu persetujuan belum masuk realisasi.' })]),
       ]),
 
       // --- terhadap target
