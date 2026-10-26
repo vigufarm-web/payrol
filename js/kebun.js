@@ -278,10 +278,11 @@ export function kotakRekomendasi(k, target) {
         + `Sisa untuk kegiatan berikutnya ${rupiahPenuh(m.available)}.` }));
       if (m.shortage > 0) baris.push(el('p.rekomendasi-awas', {
         teks: `Jika seluruh tambahan menunggu disetujui, anggaran kurang ${rupiahPenuh(m.shortage)}.` }));
-      if (m.valid) {
+      if (m.valid && m.feasible) {
         baris.push(el('p.rekomendasi-utama', { teks: `Simulasi sisa ${k.hariSisa} hari: `
           + `${fhk(m.hk)} HK total, sekitar ${fhk(m.hkPerDay)} HK per hari, `
           + `setelah menyediakan bagian premi, lembur, dan borongan.` }));
+        baris.push(el('p.bantuan', { teks: 'Kelompok tarif lebih tinggi: 1 HK per orang per hari terlebih dahulu. Kelompok tarif terendah: mengikuti sisa anggaran.' }));
         baris.push(tabel([
           { l: 'Alokasi kegiatan berikutnya', k: 'label' },
           { l: 'Sisa periode (Rp)', k: 'amount', jenis: 'uang', total: true },
@@ -291,17 +292,19 @@ export function kotakRekomendasi(k, target) {
         baris.push(tabel([
           { l: 'Tarif aktual / HK (Rp)', k: 'rate', jenis: 'uang' },
           { l: 'Pekerja tercatat', k: 'employees', jenis: 'angka' },
+          { l: 'Dasar alokasi', k: 'rule' },
           { l: 'Estimasi HK sisa', k: 'hk', jenis: 'hk', total: true },
           { l: 'HK per hari', k: 'hkPerDay', jenis: 'hk', total: true },
         ], m.groups));
-        baris.push(el('details', {}, [el('summary', { teks: 'Dasar perhitungan simulasi' }), el('p.bantuan', { teks: `Tarif ditimbang dari upah dan HK yang benar-benar tercatat `
+        baris.push(el('details', {}, [el('summary', { teks: 'Dasar perhitungan simulasi' }), el('p.bantuan', { teks: `Tarif diambil dari upah/HK tanggal terakhir tiap pekerja yang tercatat `
           + `pada divisi dan periode ini, rata-rata ${rupiahPenuh(m.rate)} / HK. `
           + 'Pekerja tanpa transaksi periode ini tidak diikutkan; tarif mandor mengikuti transaksi, tanpa disamaratakan. '
-          + 'Pembagian sisa mengikuti komposisi biaya tercatat termasuk tambahan menunggu sebagai asumsi cadangan. '
+          + 'Setiap pekerja dengan tarif di atas tarif terendah dialokasikan 1 HK/hari terlebih dahulu. Pekerja bertarif terendah mendapat sisa, maksimum 1 HK/orang/hari. Premi, lembur dan borongan dicadangkan per HK mengikuti pola periode termasuk tambahan menunggu. '
           + 'Ini simulasi batas anggaran, bukan kewajiban menghabiskan premi/lembur atau penetapan jadwal pekerja. '
           + 'Maksimal 1 HK per orang per hari; sesuaikan komposisi tim dan pekerjaan nyata. '
           + 'Biaya baru di luar pola ini mengurangi ruang anggaran.' })]));
-      } else if (m.invalid) baris.push(el('p.bantuan', { teks: 'Estimasi HK belum dapat dihitung: ada transaksi HK atau nominal upah yang tidak valid. Perbaiki input dahulu; tarif tidak ditebak.' }));
+      } else if (m.valid && !m.feasible) baris.push(el('p.rekomendasi-awas', { teks: `Anggaran belum cukup untuk prioritas ${fhk(m.priorityHK / k.hariSisa)} HK/hari pada kelompok tarif lebih tinggi. Kebutuhan sisa periode beserta cadangan tambahan ${rupiahPenuh(m.required)}; kurang ${rupiahPenuh(m.priorityShortage)}. Belum ada ruang untuk kelompok tarif terendah. Sesuaikan anggaran atau rencana hari kerja; alokasi 1 HK tidak dipotong otomatis.` }));
+      else if (m.invalid) baris.push(el('p.bantuan', { teks: 'Estimasi HK belum dapat dihitung: ada transaksi HK atau nominal upah yang tidak valid. Perbaiki input dahulu; tarif tidak ditebak.' }));
       else baris.push(el('p.bantuan', { teks: 'Belum ada dasar transaksi HK yang cukup pada periode ini untuk memperkirakan komposisi tarif dan tambahan. Tarif tidak ditebak.' }));
     }
   } else baris.push(el('p.bantuan', {
