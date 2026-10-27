@@ -1,3 +1,5 @@
+import {confirmHKEntries} from './hk-entry-confirm.js';
+import {singleSave,checkHKEntries} from './hk-entry-check.js';
 import {extraStatusRows,extraStatusDetails} from './extra-status.js';
 import {overtimeCheckPanel} from './overtime-check.js';
 import {explainApproval} from './approval-editor.js';
@@ -721,6 +723,7 @@ function formHK(barisAda, tgl, saatSelesai) {
     // blok pisang): boleh, tapi harus disadari dulu karena biayanya nempel
     // ke divisi yang sedang dipilih, bukan ke divisi blok itu.
     if (!await tanyaKomoditas(inDivisi.value, rencana.map((x) => x.block_id))) return;
+    try{if(!await confirmHKEntries(rencana.map(r=>({...r,tanggal:tglNilai,employee_id:emp.id})),{excludeIds:barisAda?[barisAda.id]:[]}))return;}catch(e){tempatGalat.append(kesalahan([e.message]));return;}
 
     // Sudah ada kerjaan di bagian lain hari itu dan masih di bawah batas:
     // itu wajar (saling bantu antar bagian), jadi jalan terus — cukup
@@ -756,6 +759,7 @@ function formHK(barisAda, tgl, saatSelesai) {
       catatan: rapikanKeterangan(inCatatan.value),
     });
 
+    checkHKEntries(D.state.data,rencana.map(r=>({...r,tanggal:tglNilai,employee_id:emp.id})),{excludeIds:barisAda?[barisAda.id]:[]});
     let pertama = null;
     if (barisAda) {
       D.ubah('daily_payroll', barisAda.id, buatIsi(rencana[0]));
@@ -965,7 +969,7 @@ function formHK(barisAda, tgl, saatSelesai) {
   }
   aksi.push(
     el('button.tombol-samar', { type: 'button', teks: 'Batal', onclick: () => p.tutup() }),
-    el('button.tombol-utama', { type: 'button', teks: 'Simpan', onclick: simpan }),
+    el('button.tombol-utama', { type: 'button', teks: 'Simpan', onclick: singleSave(async()=>{try{await simpan();}catch(e){pesan(e.message,'awas',10);}}) }),
   );
   const p = panel(barisAda ? 'Ubah HK harian' : 'Tambah HK harian', badan, aksi);
 }
@@ -1250,7 +1254,9 @@ function formMassal(tgl, saatSelesai) {
       label: `Upah HK ${e.nama}`,
       nominal: totalHk * (Number(e.tarif_hk) || 0),
     })))) return;
+    try{if(!await confirmHKEntries(dipilih.map(e=>({employee_id:e.id,tanggal:inTanggal.value,hk:totalHk}))))return;}catch(e){tempatGalat.append(kesalahan([e.message]));return;}
     const { bagian: porsi } = D.bagiHkPerBlok(blok, totalHk, inBagi.value);
+    checkHKEntries(D.state.data,dipilih.map(e=>({employee_id:e.id,tanggal:inTanggal.value,hk:totalHk})));
     let jumlahBaris = 0;
     for (const e of dipilih) {
       const tarif = Number(e.tarif_hk || 0);
@@ -1315,7 +1321,7 @@ function formMassal(tgl, saatSelesai) {
 
   const p = panel('Input HK untuk banyak pekerja & blok', badan, [
     el('button.tombol-samar', { type: 'button', teks: 'Batal', onclick: () => p.tutup() }),
-    el('button.tombol-utama', { type: 'button', teks: 'Simpan semua', onclick: simpan }),
+    el('button.tombol-utama', { type: 'button', teks: 'Simpan semua', onclick: singleSave(async()=>{try{await simpan();}catch(e){pesan(e.message,'awas',10);}}) }),
   ]);
 }
 
@@ -1346,7 +1352,7 @@ function formSalinHari(tglTujuan, saatSelesai) {
   inSumber.addEventListener('change', hitung);
   hitung();
 
-  const simpan = () => {
+  const simpan = async () => {
     const sumber = hidup('daily_payroll').filter((r) => r.tanggal === inSumber.value);
     const salah = [];
     const galatKunci = penguncianGalat(tglTujuan);
@@ -1355,6 +1361,7 @@ function formSalinHari(tglTujuan, saatSelesai) {
     kosongkan(tempatGalat);
     if (salah.length) { tempatGalat.append(kesalahan(salah)); return; }
 
+    try{if(!await confirmHKEntries(sumber.map(r=>({...r,tanggal:tglTujuan}))))return;}catch(e){tempatGalat.append(kesalahan([e.message]));return;}
     let masuk = 0;
     const lewat = [];
     const awasDivisi = [];
@@ -1415,7 +1422,7 @@ function formSalinHari(tglTujuan, saatSelesai) {
     ringkas,
   ]), [
     el('button.tombol-samar', { type: 'button', teks: 'Batal', onclick: () => p.tutup() }),
-    el('button.tombol-utama', { type: 'button', teks: 'Salin sekarang', onclick: simpan }),
+    el('button.tombol-utama', { type: 'button', teks: 'Salin sekarang', onclick: singleSave(async()=>{try{await simpan();}catch(e){pesan(e.message,'awas',10);}}) }),
   ]);
 }
 
@@ -1799,7 +1806,7 @@ function formNilai(namaTabel, kategori, prefix, barisAda, saatSelesai, { pakaiBl
   }
   aksi.push(
     el('button.tombol-samar', { type: 'button', teks: 'Batal', onclick: () => p.tutup() }),
-    el('button.tombol-utama', { type: 'button', teks: 'Simpan', onclick: simpan }),
+    el('button.tombol-utama', { type: 'button', teks: 'Simpan', onclick: singleSave(async()=>{try{await simpan();}catch(e){pesan(e.message,'awas',10);}}) }),
   );
   const p = panel(barisAda ? `Ubah ${kategori.toLowerCase()}` : `Tambah ${kategori.toLowerCase()}`, badan, aksi);
   explainApproval(p,namaTabel,barisAda);
@@ -1949,6 +1956,7 @@ export function halamanTerhapus({ gambar, bisaEdit }) {
                   return;
                 }
               }
+              if(r._tabel==='daily_payroll'){try{if(!await confirmHKEntries([{...r,deleted_at:null}]))return;}catch(e){pesan(e.message,'awas',10);return;}}
               D.pulihkan(r._tabel, r.id);
               pesan('Baris dipulihkan.', 'sukses');
               gambarIsi();
