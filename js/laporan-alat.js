@@ -12,7 +12,7 @@ import {operatorPayroll} from './payroll-model.js';
 
 import * as D from './data.js';
 import { TABEL, pakaiHm } from './skema-alat.js';
-import { hmPakai, kmPakai, dalamPeriode } from './input-alat.js';
+import { hmPakai, kmPakai, dalamPeriode } from './input-operasional-alat.js';
 import {
   el, tabel, kosongkan, rupiah, rupiahPenuh, angka, hk as fhk, tanggal as ftanggal,
   pesan, hariIni, taruh,

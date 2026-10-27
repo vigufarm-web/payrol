@@ -8,7 +8,7 @@ globalThis.localStorage = {
 };
 const { rekomendasiAnggaran } = await import('../js/kebun.js');
 const D = await import('../js/data.js');
-const { nilaiPersetujuanAlat,rincianPersetujuanAlat } = await import('../js/input-alat.js');
+const { nilaiPersetujuanAlat,rincianPersetujuanAlat } = await import('../js/input-operasional-alat.js');
 
 test('rekomendasi berhenti pada tanggal input terakhir, bukan tanggal hari ini', () => {
   const k = rekomendasiAnggaran(
@@ -75,7 +75,8 @@ test('dasar premi checks configured KM before inferring ritase and keeps recorde
  D.state.data={web:{unitPremi:{1:{km:1000,rit:2500}}},tabel:{}};
  let text=rincianPersetujuanAlat(row);assert.match(text,/Cocok dengan tarif unit saat ini: 28,00 KM/);assert.doesNotMatch(text,/Kemungkinan/);
  row.premi=77500;text=rincianPersetujuanAlat(row);assert.match(text,/Cocok dengan tarif unit saat ini: 31,00 rit/);assert.match(text,/Pembanding KM/);assert.match(text,/28.000/);assert.equal(row.premi,77500);
- row.premi=30000;text=rincianPersetujuanAlat(row);assert.match(text,/Belum cocok/);assert.match(text,/belum terkonfirmasi/);assert.equal(row.premi,30000);
+ row.premi=30000;text=rincianPersetujuanAlat(row);assert.match(text,/Mengikuti isian ritase manual/);assert.doesNotMatch(text,/Peringatan/);assert.equal(row.premi,30000);
+ row.ritase=0;text=rincianPersetujuanAlat(row);assert.match(text,/Peringatan/);row.premi_manual=true;text=rincianPersetujuanAlat(row);assert.match(text,/Mengikuti nominal premi manual/);assert.doesNotMatch(text,/Peringatan/);delete row.premi_manual;row.ritase=31;
  row.premi=105500;text=rincianPersetujuanAlat(row);assert.match(text,/Cocok dengan tarif unit saat ini: 28,00 KM.*31,00 rit/);
  D.state.data.web.unitPremi[1]={km:1000,rit:28000/31};row.premi=28000;text=rincianPersetujuanAlat(row);assert.match(text,/Lebih dari satu dasar cocok/);
 });

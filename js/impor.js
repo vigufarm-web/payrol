@@ -12,7 +12,7 @@ import * as P from './pengguna.js';
 import { mst, siklusBlok, dasarNamaBlok, hariIniIso } from './siklus.js';
 import { bacaExcel, bisaBacaExcel } from './xlsx.js';
 import { JENIS_SERVIS, pakaiHm, pakaiKm } from './skema-alat.js';
-import { sebarHk, totalHkGrup } from './input-alat.js';
+import { sebarHk, totalHkGrup } from './input-operasional-alat.js';
 import { rapikanKeterangan } from './teks.js';
 import {
   el, tabel, kosongkan, taruh, pesan, tanya, rupiah, angka, hk as fhk,
