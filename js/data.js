@@ -882,7 +882,7 @@ export function tambah(tabel, isi) {
 
 export function tambahanTerkunci(tabel,id){
  const r=cari(tabel,id);if(!r)return false;
- const perlu=['lembur_transactions','premi_transactions'].includes(tabel)||(tabel==='work_logs'&&(Number(r.premi)>0||Math.max(0,Number(r.hm_akhir||0)-Number(r.hm_awal||0))*Number(cari('operators',r.operator_id)?.tarif_jam||0)>0));
+ const perlu=['lembur_transactions','premi_transactions'].includes(tabel)||(tabel==='work_logs'&&(Number(r.premi)>0));
  return perlu&&disetujui(tabel,id);
 }
 function catatRevisiTambahan(tabel,id,aksi){if(!['lembur_transactions','premi_transactions','work_logs'].includes(tabel))return;const w=web();w.riwayatTambahan||=[];w.riwayatTambahan.push({tabel,id,aksi,oleh:namaPengisi()||'Web',waktu:sekarang(),sebelum:structuredClone(cari(tabel,id)),persetujuan:structuredClone(catatanPersetujuan(tabel,id))});}

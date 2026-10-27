@@ -159,7 +159,7 @@ function hitungAlat(data, dari, sampai) {
     const b = ambil(r.unit_id);
     const tambahanSah = accDi(data, 'work_logs', r.id);
     const o = op.get(Number(r.operator_id));
-    const nilaiTambahan = hmPakai(r) * nol(o?.tarif_jam) + nol(r.premi);
+    const nilaiTambahan = nol(r.premi);
     if (menungguDi(data, 'work_logs', r.id) && nilaiTambahan > 0) b.tunggu += 1;
     b.hari.add(r.tanggal);
     b.hm += hmPakai(r);
@@ -168,7 +168,7 @@ function hitungAlat(data, dari, sampai) {
     b.hkOp += nol(r.hk);
     b.upah += nol(r.hk) * nol(o?.tarif_harian);
     if (tambahanSah) {
-      b.upah += hmPakai(r) * nol(o?.tarif_jam);
+      // HM sudah dibayar melalui premi; jangan ditambahkan lagi.
       b.premi += nol(r.premi);
     }
   }
@@ -288,7 +288,7 @@ function mentahAlat(data, dari, sampai) {
       operator: o?.nama || '', hk: nol(r.hk),
       hm: hmPakai(r), km: kmPakai(r), ritase: nol(r.ritase), liter: 0,
       biaya: nol(r.hk) * nol(o?.tarif_harian) + (accDi(data, 'work_logs', r.id)
-        ? hmPakai(r) * nol(o?.tarif_jam) + nol(r.premi) : 0),
+        ? nol(r.premi) : 0),
       keterangan: r.keterangan || r.catatan || '',
       acc: STATUS_BARIS(data, 'work_logs', r),
     });

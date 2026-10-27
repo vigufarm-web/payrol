@@ -98,18 +98,16 @@ export async function dataRekap(dari, sampai, {alatData}={}) {
       if (!dalam(r)) continue;
       const o0 = op.get(Number(r.operator_id));
       const o = ambil(DIV, `a${r.operator_id}`, o0?.nama || `Operator #${r.operator_id}`, o0?.no_rekening);
-      const jam = Math.max(0, (Number(r.hm_akhir) || 0) - (Number(r.hm_awal) || 0));
       const tambahanSah = acc(r.id);
-      const pokok=(Number(r.hk)||0)*(Number(o0?.tarif_harian)||0),lembur=tambahanSah?jam*(Number(o0?.tarif_jam)||0):0;
+      const pokok=(Number(r.hk)||0)*(Number(o0?.tarif_harian)||0);
       const premi = tambahanSah ? (Number(r.premi) || 0) : 0;
       o.hk += Number(r.hk) || 0;
       o.gaji += pokok;
-      o.tambahan += lembur+premi;
-      if(lembur)o.lembur[r.tanggal]=(o.lembur[r.tanggal]||0)+lembur;
+      o.tambahan += premi;
       if (pokok) o.normal[r.tanggal] = (o.normal[r.tanggal] || 0) + pokok;
       if (premi) o.premi[r.tanggal] = (o.premi[r.tanggal] || 0) + premi;
       const j = job(DIV, r.kegiatan || 'Operasional alat');
-      j.hk += Number(r.hk) || 0; j.pokok += pokok; j.tambahan += lembur+premi;
+      j.hk += Number(r.hk) || 0; j.pokok += pokok; j.tambahan += premi;
     }
   }
 

@@ -148,7 +148,7 @@ async function tempelAlatBerat(tempat, per) {
     hkOp += nol(r.hk);
     upah += nol(r.hk) * nol(o?.tarif_harian);
     if (tambahanSah) {
-      upah += jam * nol(o?.tarif_jam);
+      // HM sudah termasuk premi tercatat.
       premi += nol(r.premi);
     }
     unit.add(Number(r.unit_id));

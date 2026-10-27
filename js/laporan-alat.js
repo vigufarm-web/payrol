@@ -6,7 +6,7 @@ import {operatorPayroll} from './payroll-model.js';
 // Rumusnya mengikuti README aplikasi desktop:
 //   Ltr/KM = total liter / total KM        (konsumsi solar kendaraan)
 //   HM/Ltr = total HM / total liter        (jam kerja per liter, alat berat)
-//   Upah   = (total HK x tarif harian) + (jam HM x tarif/jam) + premi
+//   Upah   = (total HK x tarif harian) + premi tercatat (HM sekali)
 //   Biaya solar & servis per lokasi dibagi sebanding HM (atau KM) yang
 //   dijalankan unit itu di tiap lokasi.
 
@@ -239,7 +239,6 @@ export function halamanPayrollOperator({ periode }) {
     { l: 'Total HK', k: 'hk', jenis: 'hk', total: true },
     { l: 'Jam HM', k: 'jam_hm', jenis: 'angka', pecahan: 1, total: true },
     { l: 'Upah harian (Rp)', k: 'upah_harian', jenis: 'uang', total: true },
-    { l: 'Upah jam (Rp)', k: 'upah_jam', jenis: 'uang', total: true },
     { l: 'Premi (Rp)', k: 'premi', jenis: 'uang', total: true },
     { l: 'Total (Rp)', k: 'total', jenis: 'uang', total: true },
     ...(tampilRekening ? [{ l: 'Bank', k: 'bank' }, { l: 'No. rekening', k: 'rekening' }] : []),
@@ -263,7 +262,7 @@ export function halamanPayrollOperator({ periode }) {
       ]),
       el('div.lembar-isi', {}, [
         el('p.bantuan', {
-          teks: 'Upah = (Total HK × tarif harian) + (jam HM × tarif per jam) + premi. '
+          teks: 'Upah = (Total HK × tarif harian) + premi tercatat (HM dibayar sekali). '
             + 'Total HK dihitung otomatis dari log harian, dibagi proporsional kalau operator kerja di beberapa lokasi dalam sehari.',
         }),
         tempat,
@@ -315,7 +314,7 @@ export function halamanBiayaLokasi({ periode }) {
     b.km += kmPakai(r);
     b.tenaga += hk * (Number(o?.tarif_harian) || 0);
     if (D.disetujui('work_logs', r.id)) {
-      b.tenaga += hmPakai(r) * (Number(o?.tarif_jam) || 0) + (Number(r.premi) || 0);
+      b.tenaga += (Number(r.premi) || 0);
     }
   }
 

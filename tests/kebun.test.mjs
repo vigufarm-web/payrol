@@ -29,7 +29,7 @@ test('tanpa input terakhir rekomendasi tidak mengarang hari berjalan', () => {
   assert.equal(k.belumMulai, true);
 });
 
-test('persetujuan Infra hanya menghitung upah jam dan premi, bukan HK', () => {
+test('persetujuan Infra menghitung premi sekali tanpa lembur HM atau HK', () => {
   D.state.data = {
     aplikasi: 'AlatBerat', web: { persetujuan: {} },
     tabel: {
@@ -38,9 +38,9 @@ test('persetujuan Infra hanya menghitung upah jam dan premi, bukan HK', () => {
     },
   };
   const nilai = nilaiPersetujuanAlat(D.state.data.tabel.work_logs[0]);
-  assert.equal(nilai.upahJam, 40_000);
+  assert.equal(nilai.upahJam, 0);
   assert.equal(nilai.premi, 15_000);
-  assert.equal(nilai.total, 55_000);
+  assert.equal(nilai.total, 15_000);
   assert.equal('upahHk' in nilai, false);
 });
 
