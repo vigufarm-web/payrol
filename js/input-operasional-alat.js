@@ -1,7 +1,7 @@
 import {approvalDateNotice} from './approval-dates.js';
 import {approvalSelection,approvalDateOptions} from './approval-date-selection.js';
 import {explainApproval} from './approval-editor.js';
-// input-alat.js — halaman input bagian Alat Berat & Kendaraan:
+// input-operasional-alat.js — halaman input bagian Alat Berat & Kendaraan:
 // Log Harian (HM/KM/ritase), Isi Solar, dan Servis Unit.
 //
 // Aturan HK mengikuti aplikasi desktop: operator mengisi "Total HK hari ini"

@@ -8,7 +8,7 @@ globalThis.localStorage = {
 };
 const { rekomendasiAnggaran } = await import('../js/kebun.js');
 const D = await import('../js/data.js');
-const { nilaiPersetujuanAlat,rincianPersetujuanAlat } = await import('../js/input-alat.js');
+const { nilaiPersetujuanAlat,rincianPersetujuanAlat } = await import('../js/input-operasional-alat.js');
 
 test('rekomendasi berhenti pada tanggal input terakhir, bukan tanggal hari ini', () => {
   const k = rekomendasiAnggaran(
