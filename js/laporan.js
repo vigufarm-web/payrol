@@ -1,4 +1,4 @@
-import {payrollWorkers} from './payroll-model.js';
+import {payrollWorkers,groupPiecework} from './payroll-model.js?v=operasional-audit-1';
 // laporan.js — halaman laporan: Ringkasan, Payroll per pekerja, dan Rekap
 // biaya per divisi/blok/kegiatan. Semua angka dihitung dari data di memori.
 
@@ -23,7 +23,7 @@ function transaksiPeriode(periode) {
   const saring = dalamPeriode(periode);
   return {
     hk: hidup('daily_payroll').filter(saring),
-    borongan: hidup('borongan_transactions').filter(saring),
+    borongan: [...hidup('borongan_transactions').filter(saring),...groupPiecework(D.state.data,...periode.rentang())],
     lembur: hidup('lembur_transactions').filter(r=>saring(r)&&D.disetujui('lembur_transactions',r.id)),
     premi: hidup('premi_transactions').filter(r=>saring(r)&&D.disetujui('premi_transactions',r.id)),
     kelompok: D.baris('borongan_group').filter((r) => !r.deleted_at && saring(r)),
@@ -31,18 +31,6 @@ function transaksiPeriode(periode) {
 }
 
 const jumlah = (baris, kolom = 'nominal') => baris.reduce((n, r) => n + (Number(r[kolom]) || 0), 0);
-
-/** Nominal borongan kelompok per anggota (dibagi sesuai baris anggota). */
-function boronganKelompokPerPekerja(kelompok) {
-  const peta = new Map();
-  const idKelompok = new Set(kelompok.map((g) => Number(g.id)));
-  for (const m of D.baris('borongan_group_members')) {
-    if (m.deleted_at || !idKelompok.has(Number(m.group_id))) continue;
-    const k = Number(m.employee_id);
-    peta.set(k, (peta.get(k) || 0) + (Number(m.nominal) || 0));
-  }
-  return peta;
-}
 
 // =====================================================================
 // RINGKASAN
@@ -182,11 +170,10 @@ async function tempelAlatBerat(tempat, per) {
 
 function isiRingkasan(periode) {
   const t = transaksiPeriode(periode);
-  const kelompokPerPekerja = boronganKelompokPerPekerja(t.kelompok);
 
   const totalHk = t.hk.reduce((n, r) => n + (Number(r.hk) || 0), 0);
   const upahHk = jumlah(t.hk);
-  const upahBorongan = jumlah(t.borongan) + [...kelompokPerPekerja.values()].reduce((a, b) => a + b, 0);
+  const upahBorongan = jumlah(t.borongan);
   const upahLembur = jumlah(t.lembur);
   const upahPremi = jumlah(t.premi);
   const total = upahHk + upahBorongan + upahLembur + upahPremi;
@@ -196,12 +183,11 @@ function isiRingkasan(periode) {
     ...t.borongan.map((r) => r.employee_id),
     ...t.lembur.map((r) => r.employee_id),
     ...t.premi.map((r) => r.employee_id),
-    ...kelompokPerPekerja.keys(),
   ]);
 
   const rincian = [
     { jenis: 'HK harian', baris: t.hk.length, nilai: upahHk },
-    { jenis: 'Borongan', baris: t.borongan.length + t.kelompok.length, nilai: upahBorongan },
+    { jenis: 'Borongan', baris: t.borongan.filter(r=>!r._group_id).length + new Set(t.borongan.filter(r=>r._group_id).map(r=>r._group_id)).size, nilai: upahBorongan },
     { jenis: 'Lembur', baris: t.lembur.length, nilai: upahLembur },
     { jenis: 'Premi', baris: t.premi.length, nilai: upahPremi },
   ];

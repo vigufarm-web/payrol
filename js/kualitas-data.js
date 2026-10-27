@@ -8,7 +8,7 @@ const hidup = (data, tabel) => (data?.tabel?.[tabel] || []).filter((r) => !r.del
 const angka = (v) => Number(v) || 0;
 const kunciBaris = (tabel, r) => [tabel, r.tanggal, r.employee_id, r.operator_id,
   r.unit_id, r.division_id, r.block_id, r.wage_component_id, r.qty, r.hk,
-  r.nominal, r.biaya].join('|');
+  r.nominal, r.biaya,r.activity_id,r.job_type_id,kunciKeterangan(r.job||''),kunciKeterangan(r.keterangan_manual||r.catatan||r.keterangan||'')].join('|');
 
 const REF_PAYROLL = {
   daily_payroll: { employee_id: 'employees', division_id: 'divisions', block_id: 'blocks', activity_id: 'activities', job_type_id: 'job_types' },
@@ -296,10 +296,18 @@ function pemeriksa(data, sekarang) {
     }
     for (const daftar of grup.values()) if (daftar.length > 1) {
       tambah({ tingkat: 'peringatan', jenis: 'Kemungkinan transaksi ganda', tabel, id: daftar[0].id,
-        detail: `${daftar.length} baris memiliki tanggal, orang/unit, lokasi, jumlah, dan nilai yang sama.` });
+        detail: `${daftar[0].tanggal||'Tanpa tanggal'} · ${hidup(data,'employees').find(e=>Number(e.id)===Number(daftar[0].employee_id))?.nama||'Unit/orang #'+(daftar[0].employee_id||daftar[0].unit_id)} · ID ${daftar.map(r=>r.id).join(', ')} · ${daftar.length} baris sama termasuk kegiatan dan keterangan, nominal per baris Rp ${angka(daftar[0].nominal||daftar[0].biaya).toLocaleString('id-ID')}. Keterangan: ${daftar[0].job||daftar[0].keterangan_manual||daftar[0].catatan||daftar[0].keterangan||'—'}. Periksa bukti sebelum menghapus.` });
     }
   }
 
+  if(data?.aplikasi!=='AlatBerat'){
+    const overlapKey=r=>[r.tanggal,r.employee_id,r.division_id,r.block_id,angka(r.qty),angka(r.tarif_snapshot),angka(r.nominal),kunciKeterangan(r.keterangan_manual||r.catatan||'')].join('|');
+    const overtime=new Map();
+    for(const r of hidup(data,'lembur_transactions'))if(angka(r.nominal)>0&&kunciKeterangan(r.keterangan_manual||r.catatan||'')){const key=overlapKey(r);if(!overtime.has(key))overtime.set(key,[]);overtime.get(key).push(r);}
+    for(const r of hidup(data,'premi_transactions')){const hits=overtime.get(overlapKey(r));if(!hits?.length)continue;
+      tambah({tingkat:'peringatan',jenis:'Potensi tumpang tindih lembur/premi',tabel:'premi_transactions',id:r.id,detail:`${r.tanggal} · ${hidup(data,'employees').find(e=>Number(e.id)===Number(r.employee_id))?.nama||'#'+r.employee_id}: premi #${r.id} dan lembur #${hits.map(x=>x.id).join(', #')} sama jumlah, tarif, nominal, lokasi dan keterangannya (${r.keterangan_manual||r.catatan}). Periksa apakah dua hak yang berbeda atau input pekerjaan yang sama. Tidak dihapus otomatis.`});
+    }
+  }
   for (const p of patchAman.values()) {
     tambah({ tingkat: 'info', jenis: 'Perbaikan aman tersedia', tabel: p.tabel, id: p.id,
       detail: p.alasan.join('; '), otomatis: true, perbaikan: [{ tabel: p.tabel, id: p.id, tambalan: p.tambalan }] });

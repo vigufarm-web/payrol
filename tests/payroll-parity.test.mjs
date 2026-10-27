@@ -25,3 +25,13 @@ test('approved EX01 October 16, 19 and 20 pay HM premium once, preserving approv
  assert.equal(rows.reduce((n,r)=>n+r.tambahan,0),283500);
  assert.equal(JSON.stringify(d),before,'calculation never mutates source data or approvals');
 });
+
+test('all operational reports count each HK, approved extra and group member once',async()=>{
+ const {biayaKebun}=await import('../js/kebun.js'),{hitungPayroll}=await import('../js/monitor-semua.js');
+ D.state.data=fixture();D.state.aplikasi='PayrollHK';const before=JSON.stringify(D.state.data.tabel),from='2026-10-26',to=from;
+ const check=()=>{const workers=payrollWorkers(D.state.data,from,to),budget=biayaKebun(1,from,to),monitor=hitungPayroll(D.state.data,from,to);const sum=workers.reduce((s,r)=>s+r.total,0);assert.equal(budget.total,sum);assert.equal(monitor.reduce((s,r)=>s+r.total,0),sum);return sum;};
+ assert.equal(check(),250000);assert.equal(JSON.stringify(D.state.data.tabel),before);
+ D.state.data.web.persetujuan.lembur_transactions[1]={status:'menunggu'};assert.equal(check(),210000);
+ D.state.data.web.persetujuan.premi_transactions[1]={status:'ditolak'};assert.equal(check(),200000);
+ D.state.data.tabel.borongan_group[0].deleted_at='test';assert.equal(check(),170000);
+});

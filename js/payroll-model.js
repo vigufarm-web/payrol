@@ -1,13 +1,16 @@
 const num=v=>Number(v)||0;
 const hidup=(d,t)=>(d?.tabel?.[t]||[]).filter(r=>!r.deleted_at);
 export const approved=(d,t,id)=>{const c=d?.web?.persetujuan?.[t]?.[String(id)];return !c||c.status==='disetujui';};
+export function groupPiecework(data,from,to){
+ const groups=new Map(hidup(data,'borongan_group').filter(r=>r.tanggal>=from&&r.tanggal<=to).map(r=>[Number(r.id),r]));
+ return hidup(data,'borongan_group_members').flatMap(m=>{const g=groups.get(Number(m.group_id));return g?[{...g,id:'group:'+g.id+':'+m.id,_group_id:g.id,employee_id:m.employee_id,nominal:num(m.nominal),qty:null,tarif_snapshot:null}]:[];});
+}
 export function payrollLedger(data,from,to){
  const period=r=>r.tanggal>=from&&r.tanggal<=to,entries=[];
  const add=(r,type,amount,hk=0)=>entries.push({...r,type,amount:num(amount),hk:num(hk)});
  for(const r of hidup(data,'daily_payroll').filter(period))add(r,'hk',r.nominal,r.hk);
  for(const r of hidup(data,'borongan_transactions').filter(period))add(r,'borongan',r.nominal);
- const groups=new Map(hidup(data,'borongan_group').filter(period).map(r=>[Number(r.id),r]));
- for(const m of hidup(data,'borongan_group_members')){const g=groups.get(Number(m.group_id));if(g)add({...g,employee_id:m.employee_id,id:'group:'+g.id+':'+m.id},'borongan',m.nominal);}
+ for(const r of groupPiecework(data,from,to))add(r,'borongan',r.nominal);
  for(const [t,type] of [['lembur_transactions','lembur'],['premi_transactions','premi']])for(const r of hidup(data,t).filter(r=>period(r)&&approved(data,t,r.id)))add(r,type,r.nominal);
  return entries;
 }

@@ -1,3 +1,4 @@
+import {groupPiecework} from './payroll-model.js?v=operasional-audit-1';
 import {budgetMix} from './budget-mix.js';
 import {approvalDateNotice} from './approval-dates.js';
 import {approvalSelection} from './approval-date-selection.js';
@@ -108,7 +109,7 @@ export function biayaKebun(divisionId, dari, sampai) {
   const diDivisi = (r) => Number(r.division_id) === Number(divisionId);
 
   const hk = hidup('daily_payroll').filter((r) => dalam(r) && diDivisi(r));
-  const borongan = hidup('borongan_transactions').filter((r) => dalam(r) && diDivisi(r));
+  const borongan = [...hidup('borongan_transactions').filter((r) => dalam(r) && diDivisi(r)),...groupPiecework(D.state.data,dari,sampai).filter(diDivisi)];
   // lembur & premi hanya dihitung kalau sudah disetujui kepala divisi
   const lembur = hidup('lembur_transactions').filter((r) => dalam(r) && diDivisi(r) && D.disetujui('lembur_transactions', r.id));
   const premi = hidup('premi_transactions').filter((r) => dalam(r) && diDivisi(r) && D.disetujui('premi_transactions', r.id));
