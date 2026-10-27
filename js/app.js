@@ -18,7 +18,7 @@ import { halamanRingkasan, halamanPayroll, halamanRekap } from './laporan.js';
 import {
   halamanLogHarian, halamanSolar, halamanServis,
   halamanTarifPremi, halamanPersetujuanAlat, halamanMonitorAlat, jumlahMenungguAlat,
-} from './input-alat.js';
+} from './input-alat.js?v=hk-ritase-20261027';
 import {
   halamanRingkasanUnit, halamanPayrollOperator, halamanBiayaLokasi, halamanLaporanHarian,
 } from './laporan-alat.js';
