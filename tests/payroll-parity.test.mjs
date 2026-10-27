@@ -35,3 +35,5 @@ test('all operational reports count each HK, approved extra and group member onc
  D.state.data.web.persetujuan.premi_transactions[1]={status:'ditolak'};assert.equal(check(),200000);
  D.state.data.tabel.borongan_group[0].deleted_at='test';assert.equal(check(),170000);
 });
+
+test('settings module imports without starting another application or requiring a browser document',async()=>{assert.equal(typeof (await import('../js/sistem.js')).halamanSistem,'function');});
