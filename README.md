@@ -154,8 +154,8 @@ data yang sama** supaya bisa saling membaca.
   *Rp per KM*. Premi operator di log harian lalu terhitung otomatis — HM/KM terpakai ×
   tarif — dan tetap bisa ditimpa manual.
 - **Tambahan operator menunggu acc.** HK dan catatan operasi langsung masuk laporan.
-  Yang perlu persetujuan kepala Infra hanya **upah jam/lembur dari HM dan premi**.
-  Selama menunggu, dua tambahan itu belum dihitung; HK, HM/KM, dan kegiatan tetap
+  Yang perlu persetujuan kepala Infra hanya **premi tercatat (HM dibayar sekali sebagai premi)**.
+  Selama menunggu, premi belum dihitung; HK, HM/KM, dan kegiatan tetap
   tercatat. Menolak persetujuan tidak menghapus log maupun HK-nya.
 - Persetujuan massal dibatasi **satu tanggal sekali jalan**. Penolakan wajib disertai
   alasan supaya koreksinya dapat ditelusuri dan tidak ada salah klik lintas hari.

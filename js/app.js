@@ -137,7 +137,7 @@ const MODUL = {
       // Kebun" di bagian payroll — isinya memang padanannya: biaya periode
       // ini dibandingkan targetnya.
       monitor: { l: 'Laporan ALB & Kendaraan', sub: 'Upah, premi, solar, dan servis terhadap target', buat: halamanMonitorAlat, periode: true },
-      persetujuan: { l: 'Persetujuan', sub: 'Upah jam/lembur dan premi Infra menunggu acc', buat: halamanPersetujuanAlat },
+      persetujuan: { l: 'Persetujuan', sub: 'Premi Infra menunggu acc', buat: halamanPersetujuanAlat },
       tarifpremi: { l: 'Tarif premi unit', sub: 'Rp per HM dan per KM tiap unit', buat: halamanTarifPremi },
       kualitas: { l: 'Pemeriksaan data', sub: 'Temukan data ganda, referensi rusak, dan meter tidak wajar', buat: halamanPemeriksaan },
       riwayat: { l: 'Riwayat perubahan', sub: 'Setiap penyimpanan tercatat di sini', buat: halamanRiwayat },

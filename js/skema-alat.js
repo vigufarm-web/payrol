@@ -40,7 +40,7 @@ export const TABEL = {
     f: [
       { k: 'nama', l: 'Nama', t: 'text', wajib: true },
       { k: 'tarif_harian', l: 'Tarif per hari kerja', t: 'money', wajib: true },
-      { k: 'tarif_jam', l: 'Tarif per jam HM', t: 'money' },
+      { k: 'tarif_jam', l: 'Tarif HM lama (arsip, tidak menambah upah)', t: 'money' },
       { k: 'bank', l: 'Bank', t: 'enum', pilihan: DAFTAR_BANK },
       { k: 'no_rekening', l: 'No. rekening', t: 'text', peka: true },
       { k: 'no_hp', l: 'No. HP', t: 'text', peka: true },

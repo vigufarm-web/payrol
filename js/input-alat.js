@@ -461,10 +461,8 @@ function formLog(barisAda, tglAwal, saatSelesai) {
     if (barisAda) { D.ubah('work_logs', barisAda.id, isi); idLog = barisAda.id; }
     else idLog = D.tambah('work_logs', isi).id;
 
-    // HK dan catatan operasi langsung berlaku. Hanya premi serta upah
-    // jam/lembur (HM × tarif jam) yang perlu persetujuan kepala divisi.
-    const adaTambahan = (Number(isi.premi) || 0) > 0
-      || (hmPakai(isi) * (Number(D.cari('operators', opId)?.tarif_jam) || 0)) > 0;
+    // HK dan catatan operasi langsung berlaku. Hanya premi tercatat yang perlu persetujuan kepala divisi.
+    const adaTambahan = (Number(isi.premi) || 0) > 0;
     if (adaTambahan) D.tandaiMenunggu('work_logs', idLog);
     else D.tanpaPersetujuan('work_logs', idLog);
 
@@ -472,7 +470,7 @@ function formLog(barisAda, tglAwal, saatSelesai) {
 
     p.tutup();
     pesan((barisAda ? 'Log harian diperbarui' : 'Log harian ditambahkan')
-      + (adaTambahan ? ' — premi/upah jam menunggu persetujuan.' : ' — HK langsung masuk laporan.'), 'sukses', 6);
+      + (adaTambahan ? ' — premi menunggu persetujuan.' : ' — HK langsung masuk laporan.'), 'sukses', 6);
     saatSelesai();
   };
 
@@ -981,18 +979,17 @@ export function jumlahMenungguAlat() {
 }
 
 export const nilaiPersetujuanAlat = (r) => {
-  const operator = D.cari('operators', r.operator_id);
-  const upahJam = hmPakai(r) * (Number(operator?.tarif_jam) || 0);
+  const upahJam = 0; // HM dibayar satu kali melalui premi tercatat.
   const premi = Number(r.premi) || 0;
   return { upahJam, premi, total: upahJam + premi };
 };
 
 export function rincianPersetujuanAlat(r) {
-  const o=D.cari('operators',r.operator_id),t=tarifPremiUnit(r.unit_id),n=nilaiPersetujuanAlat(r),bagian=[];
+  const t=tarifPremiUnit(r.unit_id),n=nilaiPersetujuanAlat(r),bagian=[];
   if(t.hm)bagian.push(`${angka(hmPakai(r),2)} HM × ${rupiahPenuh(t.hm)}`);
   if(t.km)bagian.push(`${angka(kmPakai(r),2)} KM × ${rupiahPenuh(t.km)}`);
   if(t.rit)bagian.push(`${angka(Number(r.ritase)||0,2)} rit × ${rupiahPenuh(t.rit)}`);
-  return `Upah jam: ${angka(hmPakai(r),2)} HM × ${rupiahPenuh(Number(o?.tarif_jam)||0)} = ${rupiahPenuh(n.upahJam)}. Premi tercatat ${rupiahPenuh(n.premi)}. ${bagian.length?'Acuan tarif premi saat ini: '+bagian.join(' + ')+'. Nilai tercatat tetap dipakai.':'Dasar tarif tidak tersimpan; nilai premi tercatat tidak dihitung ulang.'}${r.catatan||r.keterangan?' Catatan: '+(r.catatan||r.keterangan):''}`;
+  return `HM dibayar sekali sebagai premi; tidak ditambahkan lagi sebagai lembur. Premi tercatat ${rupiahPenuh(n.premi)}. ${bagian.length?'Acuan tarif premi saat ini: '+bagian.join(' + ')+'. Nilai tercatat tetap dipakai.':'Dasar tarif tidak tersimpan; nilai premi tercatat tidak dihitung ulang.'}${r.catatan||r.keterangan?' Catatan: '+(r.catatan||r.keterangan):''}`;
 }
 
 export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
@@ -1031,7 +1028,7 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
       } else if (!baris) {
         const lanjut = await tanya(
           `Setujui ${menungguTanggal.length} tambahan pada ${ftanggal(tanggalAcc)}?`,
-          'Premi dan upah jam/lembur langsung dihitung di laporan. HK sudah masuk tanpa menunggu persetujuan.',
+          'Premi langsung dihitung di laporan. HK sudah masuk tanpa menunggu persetujuan.',
           { ya: 'Setujui tanggal ini' });
         if (!lanjut) return;
       }
@@ -1069,11 +1066,10 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
             { l: 'Operator', nilai: (r) => D.labelRef('operators', r.operator_id) },
             { l: 'Kegiatan / lokasi', nilai: (r) => [r.kegiatan,r.lokasi].filter(Boolean).join(' · ') || '—' },
             { l: 'Ritase', k: 'ritase', jenis: 'angka' },
-            { l: 'Dasar lembur & premi', nilai:r=>el('details',{},[el('summary',{teks:'Lihat perhitungan'}),el('p',{style:'min-width:18rem;white-space:normal',teks:rincianPersetujuanAlat(r)})]) },
+            { l: 'Dasar premi', nilai:r=>el('details',{},[el('summary',{teks:'Lihat perhitungan'}),el('p',{style:'min-width:18rem;white-space:normal',teks:rincianPersetujuanAlat(r)})]) },
             { l: 'HK (langsung)', k: 'hk', jenis: 'hk', total: true },
             { l: 'HM', nilai: hmPakai, jenis: 'angka', pecahan: 1 },
             { l: 'KM', nilai: kmPakai, jenis: 'angka', pecahan: 1 },
-            { l: 'Upah jam/lembur (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).upahJam, jenis: 'uang', total: true },
             { l: 'Premi (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).premi, jenis: 'uang', total: true },
             { l: 'Total tambahan (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).total, jenis: 'uang', total: true },
             { l: '', nilai: (r) => el('span', {}, [
@@ -1099,7 +1095,7 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
         el('div.lembar-kepala', {}, [el('h2', { teks: 'Sudah disetujui' })]),
         el('div.lembar-isi', {}, [
           el('p.bantuan', { teks: bolehBatal()
-            ? 'Tambahan yang telanjur di-acc bisa dibatalkan — premi/upah jam kembali menunggu. HK tetap masuk.'
+            ? 'Tambahan yang telanjur di-acc bisa dibatalkan — premi kembali menunggu. HK tetap masuk.'
             : 'Hanya pengguna dengan hak "Batalkan persetujuan" yang bisa membatalkan.' }),
           tabel([
             { l: 'Tanggal', nilai: (r) => ftanggal(r.tanggal) },
@@ -1107,9 +1103,8 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
             { l: 'Operator', nilai: (r) => D.labelRef('operators', r.operator_id) },
             { l: 'Kegiatan / lokasi', nilai: (r) => [r.kegiatan,r.lokasi].filter(Boolean).join(' · ') || '—' },
             { l: 'Ritase', k: 'ritase', jenis: 'angka' },
-            { l: 'Dasar lembur & premi', nilai:r=>el('details',{},[el('summary',{teks:'Lihat perhitungan'}),el('p',{style:'min-width:18rem;white-space:normal',teks:rincianPersetujuanAlat(r)})]) },
+            { l: 'Dasar premi', nilai:r=>el('details',{},[el('summary',{teks:'Lihat perhitungan'}),el('p',{style:'min-width:18rem;white-space:normal',teks:rincianPersetujuanAlat(r)})]) },
             { l: 'HK (langsung)', k: 'hk', jenis: 'hk' },
-            { l: 'Upah jam/lembur (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).upahJam, jenis: 'uang' },
             { l: 'Premi (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).premi, jenis: 'uang' },
             { l: 'Total tambahan (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).total, jenis: 'uang' },
             { l: 'Di-acc oleh', nilai: (r) => D.catatanPersetujuan('work_logs', r.id)?.oleh || '–' },
@@ -1119,7 +1114,7 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
                 onclick: async (ev) => {
                   ev.stopPropagation();
                   if (!await tanya('Batalkan persetujuan log ini?',
-                    'Premi dan upah jam kembali menunggu. HK serta catatan operasi tetap masuk laporan.',
+                    'Premi kembali menunggu. HK serta catatan operasi tetap masuk laporan.',
                     { ya: 'Batalkan', bahaya: true })) return;
                   D.batalkan('work_logs', r.id, D.namaPengisi() || 'Web');
                   pesan('Dibatalkan — kembali menunggu. Jangan lupa Simpan.', 'sukses', 6);
@@ -1136,7 +1131,7 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
   gambarIsi();
   wadah.append(el('div.petunjuk', {}, [
     'HK operator dan catatan operasi langsung masuk laporan. Yang menunggu persetujuan kepala divisi '
-    + 'hanya upah jam/lembur dari HM dan premi; selama menunggu, dua tambahan itu belum dihitung.',
+    + 'hanya premi tercatat. HM dibayar sekali sebagai premi, bukan tambahan lembur. Selama menunggu, premi belum dihitung.',
   ]), tempat);
   return wadah;
 }
@@ -1166,15 +1161,13 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
     const dalam = (x) => !x.deleted_at && x.tanggal >= r.dari && x.tanggal <= r.sampai;
 
     const log = D.baris('work_logs').filter((x) => dalam(x));
-    let totalHkOp = 0; let totalJam = 0; let upahHkOp = 0; let upahJam = 0; let premiOp = 0;
+    let totalHkOp = 0; let upahHkOp = 0; let premiOp = 0;
     for (const x of log) {
       const o = D.cari('operators', x.operator_id);
       const hk = Number(x.hk) || 0;
       totalHkOp += hk;
       upahHkOp += hk * (Number(o?.tarif_harian) || 0);
       if (D.disetujui('work_logs', x.id)) {
-        totalJam += hmPakai(x);
-        upahJam += hmPakai(x) * (Number(o?.tarif_jam) || 0);
         premiOp += Number(x.premi) || 0;
       }
     }
@@ -1191,7 +1184,7 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
     // upah jam, dan premi. Solar & servis tetap ditampilkan sebagai biaya
     // unit, tapi TIDAK diadu ke target itu — kalau ikut, angka targetnya
     // jadi tidak nyambung dengan upah yang sebenarnya mau dipantau.
-    const upahTk = upahHkOp + upahJam + premiOp;
+    const upahTk = upahHkOp + premiOp;
     const biayaUnit = biayaSolar + biayaServis;
     const total = upahTk + biayaUnit;      // dipakai di tabel rincian saja
     const totalHk = totalHkOp;
@@ -1237,7 +1230,6 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
           { l: 'Nilai (Rp)', k: 'rp', jenis: 'uang', total: true },
         ], [
           { jenis: 'Upah HK operator', jumlah: `${fhk(totalHkOp)} HK`, rp: upahHkOp },
-          { jenis: 'Upah jam / lembur operator (HM × tarif jam)', jumlah: `${angka(totalJam, 1)} jam`, rp: upahJam },
           { jenis: 'Premi operator (disetujui)', jumlah: '', rp: premiOp },
           { jenis: 'Solar', jumlah: '', rp: biayaSolar },
           { jenis: 'Servis', jumlah: `${servis.length} kali`, rp: biayaServis },
@@ -1258,7 +1250,7 @@ export function halamanMonitorAlat({ periode, gambar, bisaEdit }) {
             })]),
             el('p', { teks: `Upah tenaga kerja ${rupiahPenuh(upahTk)} dari target `
               + `${rupiahPenuh(target)} (${angka(persen, 1)}%).` }),
-            el('p.bantuan', { teks: `Yang diadu ke target hanya upah operator, upah jam, dan `
+            el('p.bantuan', { teks: `Yang diadu ke target hanya upah operator dan `
               + `premi. Solar & servis ${rupiahPenuh(biayaUnit)} tidak ikut dihitung di sini.` }),
             kotakRekomendasi(rekomendasiAnggaran(
               { total: upahTk, totalHk, upahHk: upahHkGabungan }, target,
