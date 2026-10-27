@@ -22,7 +22,7 @@ import {
 import {
   halamanRingkasanUnit, halamanPayrollOperator, halamanBiayaLokasi, halamanLaporanHarian,
 } from './laporan-alat.js';
-import { halamanSistem, halamanRiwayat } from './sistem.js';
+import { halamanSistem, halamanRiwayat } from './sistem.js?v=operasional-single-entry-1';
 import { halamanImpor } from './impor.js';
 import { halamanLaporanKebun, halamanPengaturanKebun, halamanPersetujuan, jumlahMenunggu } from './kebun.js?v=operasional-audit-1';
 import { halamanMonitorSemua } from './monitor-semua.js?v=operasional-audit-1';
@@ -589,6 +589,7 @@ export function gambar() {
   const bisaUbahTransaksi = () => bisaEdit() && (P.bolehInput() || P.bolehRevisi());
   const konteks = {
     periode, gambar, bisaEdit: bisaUbahTransaksi, simpanSekarang, muatUlangData, kamus: m.kamus,
+    pengaturanAplikasi: {autoSimpanAktif,setAutoSimpan,autoMuatAktif,setAutoMuat},
     hak: {
       setuju: P.bolehSetuju, divisi: P.divisiBoleh, master: P.bolehMaster, batal: P.bolehBatal,
       // admin penuh — dipakai alat yang menyentuh data semua divisi sekaligus

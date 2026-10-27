@@ -4,9 +4,6 @@
 import * as D from './data.js';
 import * as gh from './github.js';
 import * as P from './pengguna.js';
-// impor melingkar dengan app.js aman: hanya dipakai saat tombol diklik,
-// bukan saat modul dimuat
-import * as A0 from './app.js';
 import {
   el, tabel, isian, kosongkan, pesan, tanya, waktu, angka, panel,
 } from './ui.js';
@@ -14,7 +11,7 @@ import {
 // =====================================================================
 // PENGATURAN
 // =====================================================================
-export function halamanSistem({ gambar, bisaEdit, muatUlangData }) {
+export function halamanSistem({ gambar, bisaEdit, muatUlangData, pengaturanAplikasi: A0 }) {
   const wadah = el('section');
   const lokasi = gh.lokasiRepo();
 

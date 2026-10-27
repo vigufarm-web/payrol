@@ -1,2 +1,2 @@
-// Compatibility entry for older cached pages.
-import './main.js';
+// Compatibility exports for older pages. No second application bootstrap.
+export * from './main.js';
