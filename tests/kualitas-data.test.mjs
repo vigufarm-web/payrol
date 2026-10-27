@@ -129,3 +129,11 @@ test('mendeteksi master pekerjaan yang hampir kembar tanpa menggabungkannya otom
   assert.match(masalah.detail, /Pengawasan/);
   assert.equal(masalah.perbaikan, undefined);
 });
+
+test('same HK on different jobs is not a duplicate; identical overtime and premium is review-only',()=>{
+ const d=dasar(),r={id:1,tanggal:'2026-10-20',employee_id:1,division_id:1,block_id:1,hk:.5,nominal:40000,tarif_hk_snapshot:80000,activity_id:1,job_type_id:1,job:'Irigasi'};
+ d.tabel.daily_payroll=[r,{...r,id:2,job:'Panen'}];assert.equal(periksaData(d).masalah.filter(x=>x.jenis==='Kemungkinan transaksi ganda').length,0);
+ const e={id:1,tanggal:'2026-10-20',employee_id:1,division_id:1,block_id:1,qty:1,tarif_snapshot:10000,nominal:10000,keterangan_manual:'Pengawasan'};
+ d.tabel.lembur_transactions=[e];d.tabel.premi_transactions=[{...e,id:2}];const before=JSON.stringify(d),issues=periksaData(d).masalah.filter(x=>x.jenis==='Potensi tumpang tindih lembur/premi');assert.equal(issues.length,1);assert.equal(issues[0].perbaikan,undefined);assert.equal(JSON.stringify(d),before);
+ d.tabel.premi_transactions[0].keterangan_manual='Premi panen';assert.equal(periksaData(d).masalah.filter(x=>x.jenis==='Potensi tumpang tindih lembur/premi').length,0);
+});

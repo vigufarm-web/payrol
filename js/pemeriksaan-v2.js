@@ -1,6 +1,6 @@
 // pemeriksaan-v2.js — mutu data dengan saringan, halaman, pratinjau, dan undo.
 import * as D from './data.js';
-import { periksaData } from './kualitas-data.js';
+import { periksaData } from './kualitas-data.js?v=operasional-audit-1';
 import { el, tabel, tanya, pesan, angka, kosongkan, pilihan } from './ui.js';
 
 const labelTingkat = { galat: 'Harus diperiksa', peringatan: 'Perlu ditinjau', info: 'Bisa dirapikan' };

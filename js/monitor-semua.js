@@ -1,3 +1,4 @@
+import {groupPiecework} from './payroll-model.js?v=operasional-audit-1';
 // monitor-semua.js — "Pantauan": satu halaman yang menyatukan
 // angka dari SEMUA bagian di repo ini — Payroll Operasional (semua divisi)
 // dan Alat Berat & Kendaraan — supaya admin bisa memantau semuanya tanpa
@@ -72,7 +73,7 @@ async function bacaSemuaBagian() {
 
 // ------------------------------------------------------------ hitungan
 /** Ringkasan per divisi dari satu bagian Payroll HK. */
-function hitungPayroll(data, dari, sampai) {
+export function hitungPayroll(data, dari, sampai) {
   const dalam = (r) => !r.deleted_at && r.tanggal >= dari && r.tanggal <= sampai;
   const namaDiv = new Map(barisDi(data, 'divisions').map((d) => [Number(d.id), d.nama_divisi]));
   const per = new Map();
@@ -98,7 +99,7 @@ function hitungPayroll(data, dari, sampai) {
     b.hk += nol(r.hk);
     b.pokok += nol(r.nominal);
   }
-  for (const r of barisDi(data, 'borongan_transactions')) {
+  for (const r of [...barisDi(data, 'borongan_transactions'),...groupPiecework(data,dari,sampai)]) {
     if (!dalam(r)) continue;
     const b = ambil(r.division_id);
     b.orang.add(Number(r.employee_id));
@@ -252,7 +253,7 @@ function mentahPayroll(data, dari, sampai) {
       kegiatan: nm(keg, r.activity_id), pekerjaan: nm(jen, r.job_type_id),
       acc: STATUS_BARIS(data, 'daily_payroll', r) });
   }
-  for (const r of barisDi(data, 'borongan_transactions')) {
+  for (const r of [...barisDi(data, 'borongan_transactions'),...groupPiecework(data,dari,sampai)]) {
     if (r.tanggal < dari || r.tanggal > sampai) continue;
     tambah('Borongan', r, { qty: nol(r.qty), satuan: r.satuan || satKomp.get(Number(r.wage_component_id)) || 'satuan',
       tarif: nol(r.tarif_snapshot), komponen: nm(komp, r.wage_component_id),
