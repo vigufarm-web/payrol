@@ -452,6 +452,7 @@ function formLog(barisAda, tglAwal, saatSelesai) {
       kegiatan: inKegiatan.value.trim(),
       lokasi: (inLokasi.querySelector('input').value || '').trim(),
       premi: Number(inPremi.value) || 0,
+      premi_manual: premiManual,
       catatan: inCatatan.value.trim(),
       hk: 0,
       meter_reset: inResetMeter.checked,
@@ -1000,8 +1001,14 @@ export function rincianPersetujuanAlat(r) {
   let dasar='';
   if(candidates.length===1){const c=candidates[0];dasar=`Cocok dengan tarif unit saat ini: ${formula(c.selected)} = ${rupiahPenuh(c.value)}. Data lama tidak menyimpan tarif historis; kecocokan ini bukan bukti dasar input awal.`;}
   else if(candidates.length>1)dasar=`Lebih dari satu dasar cocok: ${candidates.map(c=>formula(c.selected)).join(' atau ')}. Dasar historis belum bisa dipastikan.`;
+  else if(r.premi_manual===true || (Number(r.ritase)||0)>0) {
+    const rit=Number(r.ritase)||0;
+    dasar=rit>0?`Mengikuti isian ritase manual: ${angka(rit,2)} rit × Rp ${angka(premi/rit,2)}/rit = ${rupiahPenuh(premi)}. Tarif efektif berasal dari nominal manual tercatat.`:'Mengikuti nominal premi manual yang diisi. Rincian dasar manual tidak tersimpan.';
+    const km=configured.find(p=>p.key==='km');
+    if(km)dasar+=` Pembanding tarif KM: ${formula([km])} = ${rupiahPenuh(Math.round(km.value))}. Nominal manual tetap dipakai.`;
+  }
   else {
-    dasar=configured.length?`Belum cocok dengan tarif unit saat ini: ${configured.map(p=>`${formula([p])} = ${rupiahPenuh(Math.round(p.value))}`).join('; ')}. Perlu diperiksa, nominal tidak diubah.`:'Tarif unit untuk dasar yang tercatat belum tersedia.';
+    dasar=configured.length?`Peringatan: belum cocok dengan tarif unit saat ini: ${configured.map(p=>`${formula([p])} = ${rupiahPenuh(Math.round(p.value))}`).join('; ')}. Perlu diperiksa, nominal tidak diubah.`:'Peringatan: tarif unit belum tersedia dan tidak ada isian manual.';
     // Kesetaraan saja tidak membuktikan dasar premi. Jangan memilih ritase
     // hanya karena log memuat ritase; KM tetap diperiksa terhadap tarif admin.
     const indicative=parts.filter(p=>p.qty>0 && premi>0).map(p=>`${angka(p.qty,2)} ${p.unit} × Rp ${angka(premi/p.qty,2)}/${p.unit}`);
