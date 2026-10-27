@@ -987,11 +987,14 @@ export const nilaiPersetujuanAlat = (r) => {
 };
 
 export function rincianPersetujuanAlat(r) {
-  const t=tarifPremiUnit(r.unit_id),n=nilaiPersetujuanAlat(r),bagian=[];
-  if(t.hm)bagian.push(`${angka(hmPakai(r),2)} HM × ${rupiahPenuh(t.hm)}`);
-  if(t.km)bagian.push(`${angka(kmPakai(r),2)} KM × ${rupiahPenuh(t.km)}`);
-  if(t.rit)bagian.push(`${angka(Number(r.ritase)||0,2)} rit × ${rupiahPenuh(t.rit)}`);
-  return `HM dibayar sekali sebagai premi; tidak ditambahkan lagi sebagai lembur. Premi tercatat ${rupiahPenuh(n.premi)}. ${bagian.length?'Acuan tarif premi saat ini: '+bagian.join(' + ')+'. Nilai tercatat tetap dipakai.':'Dasar tarif tidak tersimpan; nilai premi tercatat tidak dihitung ulang.'}${r.catatan||r.keterangan?' Catatan: '+(r.catatan||r.keterangan):''}`;
+  const premi=Number(r.premi)||0,rit=Number(r.ritase)||0,hm=hmPakai(r);
+  // Tarif historis tidak tersimpan di log lama. Tampilkan kesetaraan dari
+  // nilai tercatat, bukan mengklaim tarif master saat ini sebagai tarif input.
+  let dasar='Dasar perhitungan tidak tersimpan pada log ini.';
+  if(rit>0 && hm<=0) dasar=`Setara ${angka(rit,2)} rit × Rp ${angka(premi/rit,2)}/rit (tarif efektif dari nominal tercatat).`;
+  else if(hm>0 && rit<=0) dasar=`Setara ${angka(hm,2)} HM × Rp ${angka(premi/hm,2)}/HM (tarif efektif dari nominal tercatat). HM tidak ditambahkan lagi sebagai lembur.`;
+  else if(rit>0 && hm>0) dasar='Log memuat HM dan ritase; pembagian premi tidak tersimpan, sehingga dasar tarif tidak ditebak.';
+  return `Premi tercatat ${rupiahPenuh(premi)}. ${dasar}${r.catatan||r.keterangan?' Catatan: '+(r.catatan||r.keterangan):''}`;
 }
 
 export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
