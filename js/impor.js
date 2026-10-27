@@ -1,3 +1,5 @@
+import {confirmHKEntries} from './hk-entry-confirm.js';
+import {checkHKEntries} from './hk-entry-check.js';
 // impor.js — memasukkan data harian dari berkas Excel.
 //
 // Alur: unduh template → isi di Excel → upload di sini → lihat pratinjau
@@ -287,6 +289,7 @@ export const JENIS = {
       return { pecah, peringatan };
     },
     masukkan(daftar) {
+      checkHKEntries(D.state.data,daftar.map(r=>r.isi));
       for (const r of daftar) {
         D.tambah('daily_payroll', {
           ...r.isi,
@@ -697,6 +700,7 @@ function kotakJenis(kunci, { gambar, bisaEdit }) {
                 'Data ditambahkan ke daftar, tapi belum dikirim. Setelah ini klik "Simpan ke GitHub" '
                 + 'di kanan atas supaya tersimpan.', { ya: 'Masukkan' });
               if (!lanjut) { tombol.disabled = false; return; }
+              if(def.tabel==='daily_payroll'){try{if(!await confirmHKEntries(benar.map(r=>({...r.isi,_input_group:r._baris})),{warnWithin:true})){tombol.disabled=false;return;}}catch(e){pesan(e.message,'awas',10);tombol.disabled=false;return;}}
               def.masukkan(benar);
               pesan(`${benar.length} baris ${def.label} dimasukkan. Jangan lupa Simpan.`, 'sukses', 7);
               masukan.value = '';

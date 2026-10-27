@@ -13,7 +13,7 @@ import { el, kosongkan, taruh, pesan, tanya, panel, isian, waktu, angka, namaBul
 import * as skemaPayroll from './skema-payroll.js';
 import * as skemaAlat from './skema-alat.js';
 import { halamanMaster } from './master.js';
-import { halamanHK, halamanBorongan, halamanLemburPremi, halamanTerhapus } from './transaksi.js';
+import { halamanHK, halamanBorongan, halamanLemburPremi, halamanTerhapus } from './transaksi.js?v=hk-repeat-20261027';
 import { halamanRingkasan, halamanPayroll, halamanRekap } from './laporan.js?v=operasional-audit-1';
 import {
   halamanLogHarian, halamanSolar, halamanServis,
@@ -23,7 +23,7 @@ import {
   halamanRingkasanUnit, halamanPayrollOperator, halamanBiayaLokasi, halamanLaporanHarian,
 } from './laporan-alat.js';
 import { halamanSistem, halamanRiwayat } from './sistem.js?v=operasional-single-entry-1';
-import { halamanImpor } from './impor.js';
+import { halamanImpor } from './impor.js?v=hk-repeat-20261027';
 import { halamanLaporanKebun, halamanPengaturanKebun, halamanPersetujuan, jumlahMenunggu } from './kebun.js?v=operasional-audit-1';
 import { halamanMonitorSemua } from './monitor-semua.js?v=operasional-audit-1';
 import { halamanPemeriksaan } from './pemeriksaan-v2.js?v=operasional-audit-1';

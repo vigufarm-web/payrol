@@ -1,3 +1,4 @@
+import {checkHKEntries} from './hk-entry-check.js';
 import {purgeExpiredTrash} from './trash-retention.js';
 // data.js — isi database dipegang di memori, dibaca & disimpan ke repo GitHub.
 //
@@ -431,7 +432,7 @@ export function tanpaPersetujuan(tabel, id) {
 
 // ------------------------------------------------------- khusus payroll
 export const pengaturan = () => baris('app_settings')[0] || {};
-export const maksHkPerHari = () => Number(pengaturan().max_hk_per_hari) || 1.0;
+export const maksHkPerHari = () => Math.min(1,Number(pengaturan().max_hk_per_hari)||1);
 
 export function periodeTerkunci(tanggal) {
   if (!tanggal) return false;
@@ -870,6 +871,7 @@ export const alasanTulis = (aksi, tabel, isi) =>
 
 export function tambah(tabel, isi) {
   periksaTulis('tambah', tabel, isi);
+  if(tabel==='daily_payroll'&&!isi.deleted_at)checkHKEntries(state.data,[isi]);
   const r = { id: idBaru(tabel), created_at: sekarang(), ...isi };
   // tabel payroll punya updated_at; tabel alat berat tidak
   if (baris(tabel).some((x) => 'updated_at' in x) || state.aplikasi === 'PayrollHK') {
@@ -896,6 +898,7 @@ export function ubah(tabel, id, tambalan) {
   if(tambahan&&!hkOnly){if(periodeTerkunci(r.tanggal)||periodeTerkunci(tambalan.tanggal))throw new Error('Periode dikunci. Gunakan koreksi periode berikutnya.');if(tambahanTerkunci(tabel,id)&&!(r.deleted_at&&tambalan.deleted_at===null))throw new Error('Transaksi sudah disetujui. Minta kepala divisi membatalkan persetujuan terlebih dahulu sebelum merevisi atau menghapus.');}
   periksaTulis('ubah', tabel, r);            // divisi ASAL
   periksaTulis('ubah', tabel, { ...r, ...tambalan }); // dan divisi tujuan
+  if(tabel==='daily_payroll'&&!({...r,...tambalan}).deleted_at)checkHKEntries(state.data,[{...r,...tambalan}],{excludeIds:[id]});
   if(tambahan&&!hkOnly)catatRevisiTambahan(tabel,id,'revisi');
   Object.assign(r, tambalan);
   if ('updated_at' in r) r.updated_at = sekarang();
