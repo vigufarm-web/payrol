@@ -69,3 +69,13 @@ test('revisi lembur selalu menggugurkan persetujuan lama', () => {
 });
 
 test('rincian persetujuan menampilkan ritase dan tarif tanpa mengganti premi tercatat',()=>{D.state.data={web:{unitPremi:{1:{rit:5000}}},tabel:{operators:[{id:1,tarif_jam:20000}]}};const r={unit_id:1,operator_id:1,ritase:12,premi:77500,hm_awal:0,hm_akhir:0};const text=rincianPersetujuanAlat(r);assert.match(text,/12,00 rit/);assert.match(text,/77.500/);assert.equal(r.premi,77500);});
+
+test('dasar premi checks configured KM before inferring ritase and keeps recorded money',()=>{
+ const row={unit_id:1,km_awal:100,km_akhir:128,ritase:31,premi:28000};
+ D.state.data={web:{unitPremi:{1:{km:1000,rit:2500}}},tabel:{}};
+ let text=rincianPersetujuanAlat(row);assert.match(text,/Cocok dengan tarif unit saat ini: 28,00 KM/);assert.doesNotMatch(text,/Kemungkinan/);
+ row.premi=77500;text=rincianPersetujuanAlat(row);assert.match(text,/Cocok dengan tarif unit saat ini: 31,00 rit/);assert.match(text,/Pembanding KM/);assert.match(text,/28.000/);assert.equal(row.premi,77500);
+ row.premi=30000;text=rincianPersetujuanAlat(row);assert.match(text,/Belum cocok/);assert.match(text,/belum terkonfirmasi/);assert.equal(row.premi,30000);
+ row.premi=105500;text=rincianPersetujuanAlat(row);assert.match(text,/Cocok dengan tarif unit saat ini: 28,00 KM.*31,00 rit/);
+ D.state.data.web.unitPremi[1]={km:1000,rit:28000/31};row.premi=28000;text=rincianPersetujuanAlat(row);assert.match(text,/Lebih dari satu dasar cocok/);
+});

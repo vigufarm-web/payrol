@@ -987,13 +987,28 @@ export const nilaiPersetujuanAlat = (r) => {
 };
 
 export function rincianPersetujuanAlat(r) {
-  const premi=Number(r.premi)||0,rit=Number(r.ritase)||0,hm=hmPakai(r);
-  // Tarif historis tidak tersimpan di log lama. Tampilkan kesetaraan dari
-  // nilai tercatat, bukan mengklaim tarif master saat ini sebagai tarif input.
-  let dasar='Dasar perhitungan tidak tersimpan pada log ini.';
-  if(rit>0 && hm<=0) dasar=`Setara ${angka(rit,2)} rit × Rp ${angka(premi/rit,2)}/rit (tarif efektif dari nominal tercatat).`;
-  else if(hm>0 && rit<=0) dasar=`Setara ${angka(hm,2)} HM × Rp ${angka(premi/hm,2)}/HM (tarif efektif dari nominal tercatat). HM tidak ditambahkan lagi sebagai lembur.`;
-  else if(rit>0 && hm>0) dasar='Log memuat HM dan ritase; pembagian premi tidak tersimpan, sehingga dasar tarif tidak ditebak.';
+  const premi=Number(r.premi)||0,t=tarifPremiUnit(r.unit_id);
+  const parts=[{key:'hm',unit:'HM',qty:hmPakai(r)},{key:'km',unit:'KM',qty:kmPakai(r)},{key:'rit',unit:'rit',qty:Number(r.ritase)||0}];
+  const configured=parts.filter(p=>p.qty>0 && t[p.key]>0).map(p=>({...p,rate:t[p.key],value:p.qty*t[p.key]}));
+  const formula=ps=>ps.map(p=>`${angka(p.qty,2)} ${p.unit} × ${rupiahPenuh(p.rate)}/${p.unit}`).join(' + ');
+  const candidates=[];
+  for(let mask=1;mask<(1<<configured.length);mask++){
+    const selected=configured.filter((p,i)=>mask&(1<<i));
+    const value=Math.round(selected.reduce((n,p)=>n+p.value,0));
+    if(premi>0 && Math.abs(value-premi)<0.5)candidates.push({selected,value});
+  }
+  let dasar='';
+  if(candidates.length===1){const c=candidates[0];dasar=`Cocok dengan tarif unit saat ini: ${formula(c.selected)} = ${rupiahPenuh(c.value)}. Data lama tidak menyimpan tarif historis; kecocokan ini bukan bukti dasar input awal.`;}
+  else if(candidates.length>1)dasar=`Lebih dari satu dasar cocok: ${candidates.map(c=>formula(c.selected)).join(' atau ')}. Dasar historis belum bisa dipastikan.`;
+  else {
+    dasar=configured.length?`Belum cocok dengan tarif unit saat ini: ${configured.map(p=>`${formula([p])} = ${rupiahPenuh(Math.round(p.value))}`).join('; ')}. Perlu diperiksa, nominal tidak diubah.`:'Tarif unit untuk dasar yang tercatat belum tersedia.';
+    // Kesetaraan saja tidak membuktikan dasar premi. Jangan memilih ritase
+    // hanya karena log memuat ritase; KM tetap diperiksa terhadap tarif admin.
+    const indicative=parts.filter(p=>p.qty>0 && premi>0).map(p=>`${angka(p.qty,2)} ${p.unit} × Rp ${angka(premi/p.qty,2)}/${p.unit}`);
+    if(indicative.length)dasar+=` Kemungkinan dari nominal tercatat: ${indicative.join(' atau ')} (tarif efektif hasil pembagian, belum terkonfirmasi).`;
+  }
+  const km=configured.find(p=>p.key==='km');
+  if(km && candidates.length)dasar+=` Pembanding KM: ${formula([km])} = ${rupiahPenuh(Math.round(km.value))}; selisih nominal tercatat ${rupiahPenuh(premi-Math.round(km.value))}.`;
   return `Premi tercatat ${rupiahPenuh(premi)}. ${dasar}${r.catatan||r.keterangan?' Catatan: '+(r.catatan||r.keterangan):''}`;
 }
 
