@@ -978,6 +978,8 @@ export function jumlahMenungguAlat() {
     && nilaiPersetujuanAlat(r).total > 0).length;
 }
 
+export const upahHkPersetujuanAlat = (r) => (Number(r.hk) || 0) * (Number(D.cari('operators', r.operator_id)?.tarif_harian) || 0);
+
 export const nilaiPersetujuanAlat = (r) => {
   const upahJam = 0; // HM dibayar satu kali melalui premi tercatat.
   const premi = Number(r.premi) || 0;
@@ -985,11 +987,14 @@ export const nilaiPersetujuanAlat = (r) => {
 };
 
 export function rincianPersetujuanAlat(r) {
-  const t=tarifPremiUnit(r.unit_id),n=nilaiPersetujuanAlat(r),bagian=[];
-  if(t.hm)bagian.push(`${angka(hmPakai(r),2)} HM × ${rupiahPenuh(t.hm)}`);
-  if(t.km)bagian.push(`${angka(kmPakai(r),2)} KM × ${rupiahPenuh(t.km)}`);
-  if(t.rit)bagian.push(`${angka(Number(r.ritase)||0,2)} rit × ${rupiahPenuh(t.rit)}`);
-  return `HM dibayar sekali sebagai premi; tidak ditambahkan lagi sebagai lembur. Premi tercatat ${rupiahPenuh(n.premi)}. ${bagian.length?'Acuan tarif premi saat ini: '+bagian.join(' + ')+'. Nilai tercatat tetap dipakai.':'Dasar tarif tidak tersimpan; nilai premi tercatat tidak dihitung ulang.'}${r.catatan||r.keterangan?' Catatan: '+(r.catatan||r.keterangan):''}`;
+  const premi=Number(r.premi)||0,rit=Number(r.ritase)||0,hm=hmPakai(r);
+  // Tarif historis tidak tersimpan di log lama. Tampilkan kesetaraan dari
+  // nilai tercatat, bukan mengklaim tarif master saat ini sebagai tarif input.
+  let dasar='Dasar perhitungan tidak tersimpan pada log ini.';
+  if(rit>0 && hm<=0) dasar=`Setara ${angka(rit,2)} rit × Rp ${angka(premi/rit,2)}/rit (tarif efektif dari nominal tercatat).`;
+  else if(hm>0 && rit<=0) dasar=`Setara ${angka(hm,2)} HM × Rp ${angka(premi/hm,2)}/HM (tarif efektif dari nominal tercatat). HM tidak ditambahkan lagi sebagai lembur.`;
+  else if(rit>0 && hm>0) dasar='Log memuat HM dan ritase; pembagian premi tidak tersimpan, sehingga dasar tarif tidak ditebak.';
+  return `Premi tercatat ${rupiahPenuh(premi)}. ${dasar}${r.catatan||r.keterangan?' Catatan: '+(r.catatan||r.keterangan):''}`;
 }
 
 export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
@@ -1068,10 +1073,11 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
             { l: 'Ritase', k: 'ritase', jenis: 'angka' },
             { l: 'Dasar premi', nilai:r=>el('details',{},[el('summary',{teks:'Lihat perhitungan'}),el('p',{style:'min-width:18rem;white-space:normal',teks:rincianPersetujuanAlat(r)})]) },
             { l: 'HK (langsung)', k: 'hk', jenis: 'hk', total: true },
+            { l: 'Upah HK (Rp)', nilai: upahHkPersetujuanAlat, jenis: 'uang', total: true },
             { l: 'HM', nilai: hmPakai, jenis: 'angka', pecahan: 1 },
             { l: 'KM', nilai: kmPakai, jenis: 'angka', pecahan: 1 },
             { l: 'Premi (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).premi, jenis: 'uang', total: true },
-            { l: 'Total tambahan (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).total, jenis: 'uang', total: true },
+            { l: 'Total setelah ACC (Rp)', nilai: (r) => upahHkPersetujuanAlat(r) + nilaiPersetujuanAlat(r).total, jenis: 'uang', total: true },
             { l: '', nilai: (r) => el('span', {}, [
               el('button.tombol-kecil.tombol-utama', { type: 'button', teks: 'Setujui',
                 onclick: (ev) => { ev.stopPropagation(); putuskan(r, true); } }),
@@ -1105,8 +1111,9 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
             { l: 'Ritase', k: 'ritase', jenis: 'angka' },
             { l: 'Dasar premi', nilai:r=>el('details',{},[el('summary',{teks:'Lihat perhitungan'}),el('p',{style:'min-width:18rem;white-space:normal',teks:rincianPersetujuanAlat(r)})]) },
             { l: 'HK (langsung)', k: 'hk', jenis: 'hk' },
+            { l: 'Upah HK (Rp)', nilai: upahHkPersetujuanAlat, jenis: 'uang' },
             { l: 'Premi (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).premi, jenis: 'uang' },
-            { l: 'Total tambahan (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).total, jenis: 'uang' },
+            { l: 'Total HK + premi (Rp)', nilai: (r) => upahHkPersetujuanAlat(r) + nilaiPersetujuanAlat(r).total, jenis: 'uang' },
             { l: 'Di-acc oleh', nilai: (r) => D.catatanPersetujuan('work_logs', r.id)?.oleh || '–' },
             ...(bolehBatal() && bisaEdit() ? [{
               l: '', nilai: (r) => el('button.tombol-samar.tombol-kecil', {
@@ -1131,7 +1138,7 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
   gambarIsi();
   wadah.append(el('div.petunjuk', {}, [
     'HK operator dan catatan operasi langsung masuk laporan. Yang menunggu persetujuan kepala divisi '
-    + 'hanya premi tercatat. HM dibayar sekali sebagai premi, bukan tambahan lembur. Selama menunggu, premi belum dihitung.',
+    + 'hanya premi tercatat. HM dibayar sekali sebagai premi, bukan tambahan lembur. Selama menunggu, premi belum dihitung. Total setelah ACC adalah upah HK + premi pada baris tersebut; upah HK sudah masuk laporan tanpa menunggu ACC.',
   ]), tempat);
   return wadah;
 }
