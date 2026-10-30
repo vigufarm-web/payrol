@@ -1112,33 +1112,75 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
       ]));
     }
 
-    // sudah disetujui — bisa dibatalkan oleh yang punya hak
-    const sudah = D.daftarStatus('work_logs', 'disetujui')
+    // sudah disetujui — SEMUA acc pada periode yang belum tutup buku tetap
+    // tampil (bukan hanya 30 terbaru), urut tanggal transaksi terbaru,
+    // bisa dicari & difilter. Bisa dibatalkan oleh yang punya hak.
+    const semuaAcc = D.daftarStatus('work_logs', 'disetujui')
       .map((id) => D.cari('work_logs', id))
       .filter((r) => r && !r.deleted_at && nilaiPersetujuanAlat(r).total > 0)
-      .sort((a, b) => String(b.tanggal).localeCompare(String(a.tanggal)))
-      .slice(0, 30);
-    if (sudah.length) {
-      tempat.append(el('div.lembar', { style: 'margin-top:1.4rem' }, [
-        el('div.lembar-kepala', {}, [el('h2', { teks: 'Sudah disetujui' })]),
-        el('div.lembar-isi', {}, [
-          el('p.bantuan', { teks: bolehBatal()
-            ? 'Tambahan yang telanjur di-acc bisa dibatalkan — premi kembali menunggu. HK tetap masuk.'
-            : 'Hanya pengguna dengan hak "Batalkan persetujuan" yang bisa membatalkan.' }),
-          tabel([
-            { l: 'Tanggal', nilai: (r) => ftanggal(r.tanggal) },
-            { l: 'Unit', nilai: (r) => D.labelRef('units', r.unit_id) },
-            { l: 'Operator', nilai: (r) => D.labelRef('operators', r.operator_id) },
-            { l: 'Kegiatan / lokasi', nilai: (r) => [r.kegiatan,r.lokasi].filter(Boolean).join(' · ') || '—' },
-            { l: 'Ritase', k: 'ritase', jenis: 'angka' },
-            { l: 'Dasar premi', nilai:r=>el('details',{},[el('summary',{teks:'Lihat perhitungan'}),el('p',{style:'min-width:18rem;white-space:normal',teks:rincianPersetujuanAlat(r)})]) },
-            { l: 'HK (langsung)', k: 'hk', jenis: 'hk' },
-            { l: 'Upah HK (Rp)', nilai: upahHkPersetujuanAlat, jenis: 'uang' },
-            { l: 'Premi (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).premi, jenis: 'uang' },
-            { l: 'Total HK + premi (Rp)', nilai: (r) => upahHkPersetujuanAlat(r) + nilaiPersetujuanAlat(r).total, jenis: 'uang' },
-            { l: 'Di-acc oleh', nilai: (r) => D.catatanPersetujuan('work_logs', r.id)?.oleh || '–' },
-            ...(bolehBatal() && bisaEdit() ? [{
-              l: '', nilai: (r) => el('button.tombol-samar.tombol-kecil', {
+      .map((r) => ({ ...r,
+        _oleh: D.catatanPersetujuan('work_logs', r.id)?.oleh || '',
+        _waktu: D.catatanPersetujuan('work_logs', r.id)?.waktu || '',
+        _terkunci: D.periodeTerkunci(r.tanggal) }))
+      .sort((a, b) => String(b.tanggal).localeCompare(String(a.tanggal))
+        || String(b._waktu).localeCompare(String(a._waktu)));
+    if (semuaAcc.length) {
+      let kataAcc = '';
+      let unitAcc = '';
+      let ikutTerkunciAcc = false;
+      let batasAcc = 100;
+      const unitAda = [...new Set(semuaAcc.map((r) => Number(r.unit_id) || 0))]
+        .map((id) => ({ id, nama: id ? D.labelRef('units', id) : '(tanpa unit)' }))
+        .sort((a, b) => a.nama.localeCompare(b.nama, 'id'));
+      const nKunci = semuaAcc.filter((r) => r._terkunci).length;
+
+      const cariAcc = el('input', {
+        type: 'search', placeholder: 'Cari operator / unit / kegiatan / lokasi…',
+        style: 'min-width:14rem;flex:1',
+        oninput: (e) => { kataAcc = e.target.value; batasAcc = 100; gambarAcc(); },
+      });
+      const pilihUnitAcc = el('select', {
+        'aria-label': 'Unit',
+        onchange: (e) => { unitAcc = e.target.value; gambarAcc(); },
+      }, [
+        el('option', { value: '', teks: 'Semua unit' }),
+        ...unitAda.map((u) => el('option', { value: String(u.id), teks: u.nama })),
+      ]);
+      const cekKunciAcc = el('input', { type: 'checkbox' });
+      cekKunciAcc.addEventListener('change', () => { ikutTerkunciAcc = cekKunciAcc.checked; gambarAcc(); });
+      const tempatTabelAcc = el('div');
+      const tempatInfoAcc = el('p.bantuan', { style: 'margin-top:.5rem' });
+
+      const saringAcc = () => {
+        const k = kataAcc.trim().toLowerCase();
+        return semuaAcc.filter((r) => {
+          if (!ikutTerkunciAcc && r._terkunci) return false;
+          if (unitAcc !== '' && String(Number(r.unit_id) || 0) !== unitAcc) return false;
+          if (!k) return true;
+          return [D.labelRef('units', r.unit_id), D.labelRef('operators', r.operator_id),
+            r.kegiatan, r.lokasi, r._oleh, r.tanggal].join(' ').toLowerCase().includes(k);
+        });
+      };
+      const gambarAcc = () => {
+        const data = saringAcc();
+        const tampil = data.slice(0, batasAcc);
+        kosongkan(tempatTabelAcc).append(tabel([
+          { l: 'Tanggal', nilai: (r) => ftanggal(r.tanggal) },
+          { l: 'Unit', nilai: (r) => D.labelRef('units', r.unit_id) },
+          { l: 'Operator', nilai: (r) => D.labelRef('operators', r.operator_id) },
+          { l: 'Kegiatan / lokasi', nilai: (r) => [r.kegiatan,r.lokasi].filter(Boolean).join(' · ') || '—' },
+          { l: 'Ritase', k: 'ritase', jenis: 'angka' },
+          { l: 'Dasar premi', nilai:r=>el('details',{},[el('summary',{teks:'Lihat perhitungan'}),el('p',{style:'min-width:18rem;white-space:normal',teks:rincianPersetujuanAlat(r)})]) },
+          { l: 'HK (langsung)', k: 'hk', jenis: 'hk' },
+          { l: 'Upah HK (Rp)', nilai: upahHkPersetujuanAlat, jenis: 'uang' },
+          { l: 'Premi (Rp)', nilai: (r) => nilaiPersetujuanAlat(r).premi, jenis: 'uang', total: true },
+          { l: 'Total HK + premi (Rp)', nilai: (r) => upahHkPersetujuanAlat(r) + nilaiPersetujuanAlat(r).total, jenis: 'uang', total: true },
+          { l: 'Di-acc oleh', nilai: (r) => el('span', {}, [r._oleh || '–',
+            r._waktu ? el('div.bantuan', { style: 'font-size:.74rem', teks: String(r._waktu).slice(0, 16) }) : null]) },
+          ...(bolehBatal() && bisaEdit() ? [{
+            l: '', nilai: (r) => (r._terkunci
+              ? el('span.bantuan', { teks: 'terkunci' })
+              : el('button.tombol-samar.tombol-kecil', {
                 type: 'button', teks: 'Batalkan',
                 onclick: async (ev) => {
                   ev.stopPropagation();
@@ -1149,11 +1191,39 @@ export function halamanPersetujuanAlat({ gambar, bisaEdit, hak }) {
                   pesan('Dibatalkan — kembali menunggu. Jangan lupa Simpan.', 'sukses', 6);
                   gambarIsi(); gambar();
                 },
-              }),
-            }] : []),
-          ], sudah, { kosong: '—' }),
+              })),
+          }] : []),
+        ], tampil, { kosong: 'Tidak ada acc yang cocok dengan filter/pencarian ini.' }));
+        kosongkan(tempatInfoAcc);
+        taruh(tempatInfoAcc,
+          `${data.length} acc${ikutTerkunciAcc ? '' : ' (periode berjalan — belum tutup buku)'}`
+          + (data.length > batasAcc ? ` · menampilkan ${batasAcc} teratas ` : ''),
+          data.length > batasAcc ? el('button.tombol-teks', {
+            type: 'button', teks: 'tampilkan semua', style: 'font-size:.82rem',
+            onclick: () => { batasAcc = Infinity; gambarAcc(); },
+          }) : null,
+          !ikutTerkunciAcc && nKunci ? ` · ${nKunci} acc di periode yang sudah tutup buku disembunyikan` : null,
+        );
+      };
+
+      tempat.append(el('div.lembar', { style: 'margin-top:1.4rem' }, [
+        el('div.lembar-kepala', {}, [el('h2', { teks: 'Sudah disetujui' })]),
+        el('div.lembar-isi', {}, [
+          el('p.bantuan', { teks: (bolehBatal()
+            ? 'Tambahan yang telanjur di-acc bisa dibatalkan — premi kembali menunggu. HK tetap masuk. '
+            : 'Hanya pengguna dengan hak "Batalkan persetujuan" yang bisa membatalkan. ')
+            + 'Semua acc pada periode yang belum tutup buku tampil di sini, urut tanggal terbaru.' }),
+          el('div', { style: 'display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.4rem 0 .7rem' }, [
+            cariAcc, pilihUnitAcc,
+            nKunci ? el('label', { style: 'display:flex;gap:.35rem;align-items:center;font-size:.85rem' }, [
+              cekKunciAcc, 'ikut periode terkunci',
+            ]) : null,
+          ]),
+          tempatTabelAcc,
+          tempatInfoAcc,
         ]),
       ]));
+      gambarAcc();
     }
   };
 
