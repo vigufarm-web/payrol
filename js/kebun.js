@@ -812,47 +812,103 @@ const satuanPersetujuan = (r) => String(
 const jumlahPersetujuan = (r) => `${angka(r.qty, 2)} ${satuanPersetujuan(r)}`.trim();
 
 /**
- * Daftar lembur/premi yang SUDAH disetujui (30 hari terakhir) — untuk
- * dibatalkan kalau ternyata keliru. Dibatalkan = kembali "menunggu",
- * jadi langsung keluar lagi dari hitungan laporan.
+ * Daftar lembur/premi yang SUDAH disetujui — untuk dipantau dan dibatalkan
+ * kalau ternyata keliru. Yang ditampilkan: semua acc yang PERIODENYA BELUM
+ * TUTUP BUKU (bulan belum dikunci di Pengaturan Kebun), jadi selama paruh /
+ * bulan berjalan masih kelihatan semua. Bisa dicari & difilter, dan urutannya
+ * TANGGAL TRANSAKSI terbaru paling atas (bukan urutan waktu acc).
  */
 function bagianDiputuskan({ bisaEdit, hak, muatUlang }) {
   const bolehBatal = hak?.batal ? hak.batal() : false;
   const boleh = hak?.divisi ? hak.divisi() : null;
-  const bisa = [];
+  const semuaAcc = [];
   for (const [namaTabel, label] of [['lembur_transactions', 'Lembur'], ['premi_transactions', 'Premi']]) {
     for (const id of D.daftarStatus(namaTabel, 'disetujui')) {
       const r = D.cari(namaTabel, id);
       if (!r || r.deleted_at) continue;
       if (boleh !== null && r.division_id != null && !boleh.includes(Number(r.division_id))) continue;
       const c = D.catatanPersetujuan(namaTabel, id);
-      bisa.push({ ...r, _tabel: namaTabel, _label: label, _oleh: c?.oleh || '', _waktu: c?.waktu || '' });
+      semuaAcc.push({
+        ...r, _tabel: namaTabel, _label: label,
+        _oleh: c?.oleh || '', _waktu: c?.waktu || '',
+        _terkunci: D.periodeTerkunci(r.tanggal),
+      });
     }
   }
-  bisa.sort((x, y) => String(y._waktu).localeCompare(String(x._waktu)));
-  if (!bisa.length) return null;
+  // tanggal transaksi terbaru di atas; tanggal sama → acc terbaru dulu
+  semuaAcc.sort((x, y) => String(y.tanggal).localeCompare(String(x.tanggal))
+    || String(y._waktu).localeCompare(String(x._waktu)));
+  if (!semuaAcc.length) return null;
 
-  const terbaru = bisa.slice(0, 30);
-  return el('div.lembar', { style: 'margin-top:1.4rem' }, [
-    el('div.lembar-kepala', {}, [el('h2', { teks: 'Sudah disetujui' })]),
-    el('div.lembar-isi', {}, [
-      el('p.bantuan', {
-        teks: bolehBatal
-          ? 'Kalau ada yang telanjur di-acc padahal keliru, klik Batalkan — statusnya kembali '
-            + 'menunggu dan langsung keluar dari hitungan laporan. Tercatat siapa yang membatalkan.'
-          : 'Hanya pengguna dengan hak "Batalkan persetujuan" yang bisa membatalkan dari sini.',
-      }),
-      tabel([
-        { l: 'Jenis', k: '_label' },
-        { l: 'Tanggal', nilai: (r) => ftanggal(r.tanggal) },
-        { l: 'Pekerja', nilai: (r) => D.labelRef('employees', r.employee_id) },
-        { l: 'Divisi', nilai: (r) => D.labelRef('divisions', r.division_id) },
-        { l: 'Jumlah', nilai: jumlahPersetujuan },
-        { l: 'Hasil kerja / keterangan', nilai: (r) => r.keterangan_manual || r.catatan || '–' },
-        { l: 'Nilai (Rp)', k: 'nominal', jenis: 'uang', total: true },
-        { l: 'Di-acc oleh', k: '_oleh' },
-        ...(bolehBatal && bisaEdit() ? [{
-          l: '', nilai: (r) => el('button.tombol-samar.tombol-kecil', {
+  // ----- kendali filter & cari
+  let kata = '';
+  let jenis = '';
+  let divisi = '';
+  let ikutTerkunci = false;
+  let batasTampil = 100;
+  const divisiAda = [...new Set(semuaAcc.map((r) => Number(r.division_id) || 0))]
+    .map((id) => ({ id, nama: id ? D.labelRef('divisions', id) : '(tanpa divisi)' }))
+    .sort((a, b) => a.nama.localeCompare(b.nama, 'id'));
+
+  const cari = el('input', {
+    type: 'search', placeholder: 'Cari pekerja / keterangan / no transaksi…',
+    style: 'min-width:14rem;flex:1',
+    oninput: (e) => { kata = e.target.value; batasTampil = 100; gambarTabel(); },
+  });
+  const pilihJenis = el('select', {
+    'aria-label': 'Jenis',
+    onchange: (e) => { jenis = e.target.value; gambarTabel(); },
+  }, [
+    el('option', { value: '', teks: 'Lembur & premi' }),
+    el('option', { value: 'Lembur', teks: 'Lembur saja' }),
+    el('option', { value: 'Premi', teks: 'Premi saja' }),
+  ]);
+  const pilihDivisi = el('select', {
+    'aria-label': 'Divisi',
+    onchange: (e) => { divisi = e.target.value; gambarTabel(); },
+  }, [
+    el('option', { value: '', teks: 'Semua divisi' }),
+    ...divisiAda.map((d) => el('option', { value: String(d.id), teks: d.nama })),
+  ]);
+  const cekTerkunci = el('input', { type: 'checkbox' });
+  cekTerkunci.addEventListener('change', () => { ikutTerkunci = cekTerkunci.checked; gambarTabel(); });
+
+  const tempatTabel = el('div');
+  const tempatInfo = el('p.bantuan', { style: 'margin-top:.5rem' });
+
+  const saring = () => {
+    const k = kata.trim().toLowerCase();
+    return semuaAcc.filter((r) => {
+      if (!ikutTerkunci && r._terkunci) return false;
+      if (jenis && r._label !== jenis) return false;
+      if (divisi !== '' && String(Number(r.division_id) || 0) !== divisi) return false;
+      if (!k) return true;
+      const teks = [
+        D.labelRef('employees', r.employee_id), D.labelRef('divisions', r.division_id),
+        r.keterangan_manual, r.catatan, r.nomor_transaksi, r._label, r._oleh, r.tanggal,
+      ].join(' ').toLowerCase();
+      return teks.includes(k);
+    });
+  };
+
+  const gambarTabel = () => {
+    const data = saring();
+    const tampil = data.slice(0, batasTampil);
+    const nKunci = semuaAcc.filter((r) => r._terkunci).length;
+    kosongkan(tempatTabel).append(tabel([
+      { l: 'Jenis', k: '_label' },
+      { l: 'Tanggal', nilai: (r) => ftanggal(r.tanggal) },
+      { l: 'Pekerja', nilai: (r) => D.labelRef('employees', r.employee_id) },
+      { l: 'Divisi', nilai: (r) => D.labelRef('divisions', r.division_id) },
+      { l: 'Jumlah', nilai: jumlahPersetujuan },
+      { l: 'Hasil kerja / keterangan', nilai: (r) => r.keterangan_manual || r.catatan || '–' },
+      { l: 'Nilai (Rp)', k: 'nominal', jenis: 'uang', total: true },
+      { l: 'Di-acc oleh', nilai: (r) => el('span', {}, [r._oleh || '–',
+        r._waktu ? el('div.bantuan', { style: 'font-size:.74rem', teks: String(r._waktu).slice(0, 16) }) : null]) },
+      ...(bolehBatal && bisaEdit() ? [{
+        l: '', nilai: (r) => (r._terkunci
+          ? el('span.bantuan', { teks: 'terkunci' })
+          : el('button.tombol-samar.tombol-kecil', {
             type: 'button', teks: 'Batalkan',
             onclick: async (ev) => {
               ev.stopPropagation();
@@ -865,12 +921,44 @@ function bagianDiputuskan({ bisaEdit, hak, muatUlang }) {
               pesan('Persetujuan dibatalkan — kembali menunggu. Jangan lupa Simpan.', 'sukses', 6);
               muatUlang();
             },
-          }),
-        }] : []),
-      ], terbaru, { kosong: '—' }),
-      bisa.length > 30 ? el('p.bantuan', { teks: `Menampilkan 30 terbaru dari ${bisa.length}.` }) : null,
+          })),
+      }] : []),
+    ], tampil, { kosong: 'Tidak ada acc yang cocok dengan filter/pencarian ini.' }));
+    kosongkan(tempatInfo);
+    taruh(tempatInfo,
+      `${data.length} acc${ikutTerkunci ? '' : ' (periode berjalan — belum tutup buku)'}`
+      + (data.length > batasTampil ? ` · menampilkan ${batasTampil} teratas ` : ''),
+      data.length > batasTampil ? el('button.tombol-teks', {
+        type: 'button', teks: 'tampilkan semua', style: 'font-size:.82rem',
+        onclick: () => { batasTampil = Infinity; gambarTabel(); },
+      }) : null,
+      !ikutTerkunci && nKunci ? ` · ${nKunci} acc di periode yang sudah tutup buku disembunyikan` : null,
+    );
+  };
+
+  const hasil = el('div.lembar', { style: 'margin-top:1.4rem' }, [
+    el('div.lembar-kepala', {}, [el('h2', { teks: 'Sudah disetujui' })]),
+    el('div.lembar-isi', {}, [
+      el('p.bantuan', {
+        teks: (bolehBatal
+          ? 'Kalau ada yang telanjur di-acc padahal keliru, klik Batalkan — statusnya kembali '
+            + 'menunggu dan langsung keluar dari hitungan laporan. Tercatat siapa yang membatalkan. '
+          : 'Hanya pengguna dengan hak "Batalkan persetujuan" yang bisa membatalkan dari sini. ')
+          + 'Daftar ini menampilkan SEMUA acc pada periode yang belum tutup buku, '
+          + 'urut tanggal transaksi terbaru.',
+      }),
+      el('div', { style: 'display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.4rem 0 .7rem' }, [
+        cari, pilihJenis, pilihDivisi,
+        el('label', { style: 'display:flex;gap:.35rem;align-items:center;font-size:.85rem' }, [
+          cekTerkunci, 'ikut periode terkunci',
+        ]),
+      ]),
+      tempatTabel,
+      tempatInfo,
     ]),
   ]);
+  gambarTabel();
+  return hasil;
 }
 
 export function halamanPersetujuan({ gambar, bisaEdit, hak }) {
