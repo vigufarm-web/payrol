@@ -13,7 +13,7 @@ async function fetchCatalog(app,D){const auth=session(app,D);if(!auth||(auth.ori
 async function runSynchronization({D,app,canEdit=()=>false,markChanged=()=>{},save,isBusy=()=>false,load=()=>fetchCatalog(app,D),clock=()=>new Date().toISOString()}, {force=false}={}) {
  const pending=D.state.gisPending;
  if(pending){
-  if(D.state.path!==pending.path)delete D.state.gisPending;
+  if(D.state.path!==pending.path||!D.state.belumDisimpan)delete D.state.gisPending;
   else if(isBusy()||!canEdit()||!save||!gisOnlyChanges(pending.base,D.state.data,app))return {deferred:true};
   else {await save();delete D.state.gisPending;return {...pending.result,persisted:!D.state.belumDisimpan};}
  }
