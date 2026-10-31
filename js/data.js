@@ -1,3 +1,4 @@
+import {assertGISMerge,captureGISSnapshot,historicalGISMaster,currentGISDate,gisCycleAt,assertGISMasterStructure,assertGISMasterEdit,assertGISBlockActive} from './gis-model.js';
 import {checkHKEntries} from './hk-entry-check.js';
 import {purgeExpiredTrash} from './trash-retention.js';
 // data.js — isi database dipegang di memori, dibaca & disimpan ke repo GitHub.
@@ -95,7 +96,9 @@ export function labelBlokPada(blockId, tanggal) {
   const r = cari('blocks', blockId);
   if (!r) return labelRef('blocks', blockId);
   const acuan = /^\d{4}-\d{2}-\d{2}$/.test(String(tanggal || '')) ? tanggal : undefined;
-  return namaBlokSiklus(r.nama_blok, tanamBlok(r.id), acuan);
+  const previous=historicalGISMaster(state.data,r.id,acuan);
+  const first=state.data.web?.gis?.master_history?.[r.id]?.[0],useGIS=first&&(!acuan||acuan>=first.at.slice(0,10));
+  return namaBlokSiklus(previous?.name||r.nama_blok,previous?previous.planted_on:tanamBlok(r.id),acuan,useGIS?gisCycleAt(state.data,r.id,acuan):null);
 }
 
 /**
@@ -260,6 +263,7 @@ export async function pulihkanCadanganLokal(id) {
   data.rev = Math.max(Number(state.data?.rev) || 0, Number(data.rev) || 0);
   state.data = data;
   gh.setTokenBersama(data.web?.token || '');
+  Promise.all([import('./gis-panel.js'),import('./pengguna.js')]).then(([m,p])=>m.startGISAuto({D:{state},app:'payrol',isAdmin:p.adalahAdmin,canEdit:()=>!!gh.ambilToken(),markChanged:tandaiBerubah})).catch(()=>{});
   tandaiBerubah();
   return data;
 }
@@ -293,9 +297,11 @@ export function web() {
 // disimpan di bagian `web` (khusus situs, ikut terbawa saat Kirim/Tarik).
 // Dipakai menghitung umur tanaman (MST) dan siklus PC/R1/R2/R3/R4.
 
-export const tanamBlok = (blockId) => web().tanamBlok?.[String(blockId)] || null;
+export const tanamBlok = (blockId) => currentGISDate(state.data,blockId) ?? (currentGISDate(state.data,blockId)===null?null:web().tanamBlok?.[String(blockId)]||null);
 
 export function setTanamBlok(blockId, tanggal) {
+  if(web().gis?.authoritative)throw new Error('Tanggal tanam dikelola hanya melalui Peta Kebun.');
+  if(web().gis?.mappings?.[blockId]&&(tanggal||null)!==tanamBlok(blockId))throw new Error('Tanggal tanam berasal dari GIS. Ubah melalui Peta Kebun.');
   const bersih = /^\d{4}-\d{2}-\d{2}$/.test(String(tanggal || '')) ? tanggal : null;
   setWeb((w) => {
     w.tanamBlok ||= {};
@@ -762,6 +768,7 @@ export async function simpan(pesan) {
  *   benar-benar diubah lokal yang menimpa; sisanya ikut remote.
  */
 export function gabungTiga(dasar, lokal, remote) {
+  assertGISMerge(dasar,lokal,remote);
   const hasil = JSON.parse(JSON.stringify(remote));
   hasil.tabel ||= {};
   const beda = (a, b) => JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
@@ -870,6 +877,8 @@ export const alasanTulis = (aksi, tabel, isi) =>
   (penjagaTulis ? penjagaTulis(aksi, tabel, isi) : null);
 
 export function tambah(tabel, isi) {
+  assertGISMasterStructure(state.data,'payrol',tabel);
+  if(tabel!=='blocks')assertGISBlockActive(state.data,'payrol',isi);
   periksaTulis('tambah', tabel, isi);
   if(tabel==='daily_payroll'&&!isi.deleted_at)checkHKEntries(state.data,[isi]);
   const r = { id: idBaru(tabel), created_at: sekarang(), ...isi };
@@ -878,6 +887,7 @@ export function tambah(tabel, isi) {
     r.updated_at = sekarang();
   }
   baris(tabel).push(r);
+  captureGISSnapshot(state.data,'payrol',tabel,r);
   tandaiBerubah();
   return r;
 }
@@ -892,6 +902,7 @@ export function hapusTambahanAlat(id){const r=cari('work_logs',id);if(!r)throw n
 export function bersihkanSampah(){const n=purgeExpiredTrash(state.data);if(n){web().pembersihanSampah={jumlah:n,waktu:sekarang(),oleh:namaPengisi()||'Admin'};tandaiBerubah();}return n;}
 
 export function ubah(tabel, id, tambalan) {
+  assertGISMasterEdit(state.data,'payrol',tabel,id,tambalan);
   const r = cari(tabel, id);
   if (!r) throw new Error('Baris tidak ditemukan.');
   const tambahan=['lembur_transactions','premi_transactions','work_logs'].includes(tabel),hkOnly=tabel==='work_logs'&&Object.keys(tambalan).every(k=>k==='hk');
@@ -900,7 +911,10 @@ export function ubah(tabel, id, tambalan) {
   periksaTulis('ubah', tabel, { ...r, ...tambalan }); // dan divisi tujuan
   if(tabel==='daily_payroll'&&!({...r,...tambalan}).deleted_at)checkHKEntries(state.data,[{...r,...tambalan}],{excludeIds:[id]});
   if(tambahan&&!hkOnly)catatRevisiTambahan(tabel,id,'revisi');
+  const changedBlock='block_id' in tambalan&&String(tambalan.block_id)!==String(r.block_id);
+  if(changedBlock)assertGISBlockActive(state.data,'payrol',{...r,...tambalan});
   Object.assign(r, tambalan);
+  captureGISSnapshot(state.data,'payrol',tabel,r,{replace:changedBlock});
   if ('updated_at' in r) r.updated_at = sekarang();
   // Setiap revisi lembur/premi menggugurkan keputusan lama, dari jalur mana
   // pun revisinya dilakukan (form, perbaikan data, atau pemulihan).
@@ -918,6 +932,7 @@ export function ubah(tabel, id, tambalan) {
 
 /** `lunak` hanya untuk tabel yang punya kolom deleted_at (transaksi payroll). */
 export function hapus(tabel, id, { lunak = false, aksi = 'hapus' } = {}) {
+  assertGISMasterStructure(state.data,'payrol',tabel);
   const daftar = baris(tabel);
   const i = daftar.findIndex((r) => Number(r.id) === Number(id));
   if (i < 0) throw new Error('Baris tidak ditemukan.');
@@ -962,3 +977,5 @@ export function nomorBaru(tabel, prefix, tanggal) {
   }
   return awalan + String(maks + 1).padStart(6, '0');
 }
+
+export const siklusGIS=(id,at)=>gisCycleAt(state.data,id,at);
