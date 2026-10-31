@@ -9,13 +9,17 @@
 //     mzbay10-sudo.github.io/payroll-kebun  →  mzbay10-sudo / payroll-kebun
 
 const API = 'https://api.github.com';
-const KUNCI_TOKEN = 'app.token';
-const KUNCI_REPO = 'app.repo';
+const lingkup=()=>typeof location==='undefined'?'local':location.hostname+'/'+(location.pathname.split('/').filter(Boolean)[0]||'root');
+const kunciToken=()=> 'app.token.'+lingkup();
+const kunciRepo=()=> 'app.repo.'+lingkup();
 
 export function lokasiRepo() {
   // 1) Disetel manual (mis. saat dibuka dari komputer lokal untuk ujicoba)
   try {
-    const manual = JSON.parse(localStorage.getItem(KUNCI_REPO) || 'null');
+    const legacy=JSON.parse(localStorage.getItem('app.repo')||'null');
+    const pageOwner=location.hostname.match(/^([a-z0-9-]+)\.github\.io$/i)?.[1],pageRepo=location.pathname.split('/').filter(Boolean)[0];
+    const compatible=!pageOwner||(legacy?.owner?.toLowerCase()===pageOwner.toLowerCase()&&legacy?.repo===pageRepo);
+    const manual=JSON.parse(localStorage.getItem(kunciRepo())||'null')||(compatible?legacy:null);
     if (manual?.owner && manual?.repo) return { ...manual, sumber: 'manual' };
   } catch { /* abaikan */ }
 
@@ -33,7 +37,7 @@ export function lokasiRepo() {
 }
 
 export function setLokasiRepo(owner, repo, branch = 'main') {
-  localStorage.setItem(KUNCI_REPO, JSON.stringify({ owner, repo, branch }));
+  localStorage.setItem(kunciRepo(), JSON.stringify({ owner, repo, branch }));
 }
 
 // Token bersama: admin bisa menyimpan token DI DALAM berkas data terenkripsi,
@@ -42,11 +46,11 @@ export function setLokasiRepo(owner, repo, branch = 'main') {
 let tokenBersama = '';
 export const setTokenBersama = (t) => { tokenBersama = String(t || '').trim(); };
 
-export const adaTokenLokal = () => !!localStorage.getItem(KUNCI_TOKEN);
-export const ambilToken = () => localStorage.getItem(KUNCI_TOKEN) || tokenBersama || '';
+export const adaTokenLokal = () => !!localStorage.getItem(kunciToken())||(!tokenBersama&&!!localStorage.getItem('app.token')); 
+export const ambilToken = () => localStorage.getItem(kunciToken()) || tokenBersama || localStorage.getItem('app.token') || ''; // legacy never overrides the dataset's own shared credential
 export const simpanToken = (t) => {
-  if (t) localStorage.setItem(KUNCI_TOKEN, t.trim());
-  else localStorage.removeItem(KUNCI_TOKEN);
+  if (t) localStorage.setItem(kunciToken(), t.trim());
+  else localStorage.removeItem(kunciToken());
 };
 
 function pesanGalat(kode, badan) {
@@ -82,6 +86,7 @@ async function minta(metode, url, isi, token) {
     e.kode = r.status;
     throw e;
   }
+  if(metode!=='GET'&&token&&token===localStorage.getItem('app.token'))localStorage.setItem(kunciToken(),token);
   return badan;
 }
 
