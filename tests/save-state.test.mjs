@@ -1,0 +1,6 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {finishSavedSnapshot} from '../js/save-state.js';
+const fixture=()=>{const data={rev:2,tabel:{rows:[{id:1,qty:4}]}};const state={data,path:'data/test.json',belumDisimpan:true};return {state,saved:{json:JSON.stringify(data),data,path:state.path,sha:'new-sha',meta:{rev:2}}};};
+test('a completed write records only its actual serialized snapshot',()=>{const {state,saved}=fixture();assert.deepEqual(finishSavedSnapshot(state,saved),{current:true,pending:false});assert.equal(state.dasarJson,saved.json);assert.equal(state.sha,'new-sha');assert.equal(state.belumDisimpan,false);});
+test('input during a write remains dirty and is absent from the saved baseline',()=>{const {state,saved}=fixture();state.data.tabel.rows.push({id:2,qty:9});assert.equal(finishSavedSnapshot(state,saved).pending,true);assert.equal(state.belumDisimpan,true);assert.equal(JSON.parse(state.dasarJson).tabel.rows.length,1);assert.equal(state.data.tabel.rows.length,2);});
+test('a late write response cannot change another open dataset',()=>{const {state,saved}=fixture();state.data={rev:7};state.path='data/other.json';const before=structuredClone(state);assert.equal(finishSavedSnapshot(state,saved).current,false);assert.deepEqual(state,before);});

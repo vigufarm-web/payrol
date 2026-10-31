@@ -44,3 +44,9 @@ test('GIS-only rebase keeps concurrent staff transactions and uses remote numeri
  assert.equal(gisOnlyChanges(base,local,'payrol'),true);const merged=rebaseGISOnly(base,local,remote,'payrol');assert.deepEqual(merged.tabel.hk,remote.tabel.hk);const m=merged.tabel.blocks.find(b=>b.gis_block_id==='uuid-M');assert.equal(m.id,9);assert.equal(merged.web.gis.mappings[9],'uuid-M');
  local.tabel.hk.push({id:3,jumlah:4});assert.throws(()=>rebaseGISOnly(base,local,remote,'payrol'),/Input pengguna berubah/);
 });
+
+test('failed GIS save retries without re-fetching and will not discard human input',async()=>{
+ const D={state:{data:source(),path:'data/payroll.json',belumDisimpan:false}};let attempts=0,reads=0;const opts={D,app:'payrol',canEdit:()=>true,markChanged:()=>D.state.belumDisimpan=true,save:async()=>{attempts++;if(attempts===1)throw Error('offline write');D.state.belumDisimpan=false;},load:async()=>{reads++;return catalog();},clock:()=>'2026-10-31T00:00:00Z'};
+ await assert.rejects(synchronizeGIS(opts),/offline write/);assert.ok(D.state.gisPending);assert.equal((await synchronizeGIS(opts)).persisted,true);assert.equal(attempts,2);assert.equal(reads,1);assert.equal(D.state.gisPending,undefined);
+ attempts=0;D.state.data=source();await assert.rejects(synchronizeGIS(opts),/offline write/);D.state.data.tabel.hk.push({id:99,jumlah:8});assert.equal((await synchronizeGIS(opts)).deferred,true);assert.equal(attempts,1);assert.ok(D.state.data.tabel.hk.some(r=>r.id===99));
+});
