@@ -1,3 +1,4 @@
+import {mountGISPanel} from './gis-panel.js';
 // sistem.js — halaman Pengaturan (mode edit, token, dataset) dan
 // Riwayat perubahan (diambil dari daftar commit repo).
 
@@ -245,6 +246,7 @@ export function halamanSistem({ gambar, bisaEdit, muatUlangData, pengaturanAplik
     ]));
   }
 
+  mountGISPanel(wadah,{D,app:'payrol',isAdmin:P.adalahAdmin,canEdit:bisaEdit,markChanged:()=>D.setWeb(()=>{})});
   return wadah;
 }
 

@@ -5,7 +5,7 @@
 // Harus cocok dengan models/schema.py di aplikasi desktop.
 
 import { namaBlokSiklus } from './siklus.js';
-import { tanamBlok } from './data.js';
+import { tanamBlok,siklusGIS } from './data.js';
 
 export const KATEGORI_UPAH = ['HK', 'Borongan', 'Lembur', 'Premi'];
 export const STATUS = ['Aktif', 'Tidak Aktif'];
@@ -49,7 +49,7 @@ export const TABEL = {
     tunggal: 'blok',
     // Nama yang TAMPIL ikut siklus hasil hitungan dari tanggal tanam
     // (lihat siklus.js). Yang tersimpan tetap nama dasarnya.
-    label: (r) => namaBlokSiklus(r.nama_blok, tanamBlok(r.id)),
+    label: (r) => namaBlokSiklus(r.nama_blok, tanamBlok(r.id),undefined,siklusGIS(r.id)),
     cari: ['kode_blok', 'nama_blok', 'komoditas'],
     f: [
       { k: 'kode_blok', l: 'Kode', t: 'text', wajib: true, unik: true },
