@@ -1,4 +1,4 @@
-import {automaticGISData,gisSyncDue,gisSyncDay} from './gis-model.js?v=gis-pages-3';
+import {automaticGISData,gisSyncDue,gisSyncDay,gisOnlyChanges} from './gis-model.js?v=gis-pages-3';
 const DISCOVERY='https://laporankebun.vercel.app';let GIS=DISCOVERY,EDITOR=DISCOVERY+'/peta';const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function discover(){try{const r=await fetch(DISCOVERY+'/api/gis-service',{cache:'no-store',signal:AbortSignal.timeout(8000)});if(!r.ok)return;const d=await r.json(),u=new URL(d.url);if(u.origin==='https://vigufarm-web.github.io'&&u.pathname==='/peta-kebun/'&&!u.search&&!u.hash){EDITOR=u.href;}else if(u.origin===DISCOVERY&&!u.search&&!u.hash){EDITOR=DISCOVERY+'/peta';}}catch{/* Keep the last verified service during a network failure. */}}
 const access=new Map();let timer;let currentContext;let busy=false;const messages=new Set();
@@ -11,6 +11,12 @@ function session(app,D){
 }
 async function fetchCatalog(app,D){const auth=session(app,D);if(!auth||(auth.origin||DISCOVERY)!==GIS)throw Error('Admin perlu mengaktifkan sambungan otomatis GIS satu kali.');const r=await fetch(GIS+'/api/gis-reference',{cache:'no-store',headers:{Authorization:'Bearer '+auth.token,'X-GIS-App':app},signal:AbortSignal.timeout(90000)}),d=await r.json();if(!r.ok)throw Error(d.error||'Referensi GIS belum dapat dimuat');return d;}
 async function runSynchronization({D,app,canEdit=()=>false,markChanged=()=>{},save,isBusy=()=>false,load=()=>fetchCatalog(app,D),clock=()=>new Date().toISOString()}, {force=false}={}) {
+ const pending=D.state.gisPending;
+ if(pending){
+  if(D.state.path!==pending.path)delete D.state.gisPending;
+  else if(isBusy()||!canEdit()||!save||!gisOnlyChanges(pending.base,D.state.data,app))return {deferred:true};
+  else {await save();delete D.state.gisPending;return {...pending.result,persisted:!D.state.belumDisimpan};}
+ }
  const source=D.state.data;if(!source||D.state.belumDisimpan||isBusy())return {deferred:true};
  const now=clock();if(!force&&!gisSyncDue(source,now))return {skipped:true};
  const catalog=await load();
@@ -18,8 +24,9 @@ async function runSynchronization({D,app,canEdit=()=>false,markChanged=()=>{},sa
  // while the request was in flight. Never replace that user's newer state.
  if(D.state.data!==source||D.state.belumDisimpan||isBusy())return {deferred:true};
  const result=automaticGISData(source,catalog,app,now);D.state.data=result.data;
- if(canEdit()) {markChanged();if(save)await save();}
- return {...result,data:undefined,day:gisSyncDay(now),persisted:canEdit()&&!D.state.belumDisimpan};
+ const summary={applied:result.applied,created:result.created,unmatched:result.unmatched,day:gisSyncDay(now)};
+ if(canEdit()) {markChanged();if(save)try{await save();}catch(e){D.state.gisPending={base:source,path:D.state.path,result:summary};throw e;}}
+ return {...summary,persisted:canEdit()&&!D.state.belumDisimpan};
 }
 const synchronizing=new WeakSet();
 export async function synchronizeGIS(options,mode={}){const key=options.D.state;if(synchronizing.has(key))return {deferred:true};synchronizing.add(key);try{return await runSynchronization(options,mode);}finally{synchronizing.delete(key);}}

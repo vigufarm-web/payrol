@@ -5,11 +5,13 @@ function plantingDate(b,at='9999-12-31'){const groups=(b.plantings||[]).filter(p
 export function buildGISPlan(data,catalog,app,manualMappings={}){
  if(catalog?.schema!==1||!Array.isArray(catalog.blocks)||typeof catalog.revision!=='string')throw Error('Format referensi GIS tidak dikenali.');
  const ids=new Set();for(const b of catalog.blocks){if(!b.id||ids.has(b.id)||!Array.isArray(b.aliases)||!Array.isArray(b.plantings))throw Error('Identitas blok GIS tidak valid atau ganda.');ids.add(b.id);}
- const saved=data.web?.gis?.mappings||{},mappings={...saved,...manualMappings},rows=[];
+ const saved=data.web?.gis?.mappings||{},mappings={...saved,...manualMappings},rows=[],byId=new Map(catalog.blocks.map(b=>[b.id,b])),byName=new Map(),divisions=new Map();
+ for(const d of data.tabel?.divisions||[])if(!divisions.has(norm(d.nama_divisi)))divisions.set(norm(d.nama_divisi),d);
+ for(const b of catalog.blocks)if(b.active)for(const name of new Set([b.name,...b.aliases].map(norm))){if(!byName.has(name))byName.set(name,[]);byName.get(name).push(b);}
  for(const l of localBlocks(data,app)){
-  let choices=mappings[l.id]?[catalog.blocks.find(b=>b.id===mappings[l.id])].filter(Boolean):catalog.blocks.filter(b=>b.active&&[b.name,...b.aliases].some(n=>norm(n)===norm(l.name))&&(!l.commodity||norm(b.commodity)===norm(l.commodity)));
+  let choices=mappings[l.id]?[byId.get(mappings[l.id])].filter(Boolean):(byName.get(norm(l.name))||[]).filter(b=>!l.commodity||norm(b.commodity)===norm(l.commodity));
   if(choices.length!==1){rows.push({local:l,status:choices.length?'ambiguous':'unmatched',candidates:choices.map(b=>b.id)});continue;}
-  const b=choices[0],plant=plantingDate(b,catalog.as_of),area=b.gis_area_ha,division=app==='payrol'?(data.tabel.divisions||[]).find(d=>norm(d.nama_divisi)===norm(b.commodity)):null,commodityConflict=!!l.commodity&&norm(l.commodity)!==norm(b.commodity);
+  const b=choices[0],plant=plantingDate(b,catalog.as_of),area=b.gis_area_ha,division=app==='payrol'?divisions.get(norm(b.commodity)):null,commodityConflict=!!l.commodity&&norm(l.commodity)!==norm(b.commodity);
   const dateConflict=!!(l.planted_on&&plant.date&&l.planted_on!==plant.date),dateMissing=!!(l.planted_on&&!plant.date&&!plant.multiple),areaUnknown=area==null||!Number.isFinite(Number(area))||Number(area)<0;
   rows.push({local:l,gis:b,status:!b.active?'inactive':app==='payrol'&&!division?'division-missing':areaUnknown?'area-missing':dateMissing?'date-missing':commodityConflict?'commodity-conflict':dateConflict?'date-conflict':'ready',newLink:saved[l.id]!==b.id,next:{division_id:division?.id,name:b.name,area:areaUnknown?null:Number(area),basis:'luas GIS',planted_on:plant.date,multiplePlantings:plant.multiple},changes:{commodity:commodityConflict,name:l.name!==b.name,area:Number(l.area)!==Number(area),planted_on:!!plant.date&&l.planted_on!==plant.date}});
  }
@@ -23,7 +25,7 @@ export function applyGISPlan(data,catalog,app,{allowDateConflicts=false,automati
  let applied=0;
  for(const row of plan.rows){if(row.status!=='ready'&&!(allowDateConflicts&&['date-conflict','commodity-conflict','date-missing'].includes(row.status)))continue;if(automatic&&row.newLink)continue;
   const table=app==='payrol'?'blocks':'master_blok',local=data.tabel[table].find(r=>String(r.id)===String(row.local.id));
-  const previous=localBlocks(data,app).find(r=>String(r.id)===String(local.id));
+  const previous=row.local;
   const last=g.master_history[local.id]?.at(-1),changed=row.newLink||Object.values(row.changes).some(Boolean)||last?.gis_version!==row.gis.version||JSON.stringify(g.approved_blocks[row.gis.id])!==JSON.stringify(row.gis);
   if(!changed)continue;
   (g.master_history[local.id]||=[]).push({at:now,gis_id:row.gis.id,gis_version:row.gis.version,before:previous,after:{id:local.id,name:row.next.name,area:row.next.area,commodity:row.gis.commodity,planted_on:row.next.planted_on},multiple_plantings:row.next.multiplePlantings});

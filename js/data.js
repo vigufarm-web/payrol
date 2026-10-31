@@ -1,3 +1,4 @@
+import {finishSavedSnapshot} from './save-state.js';
 import {rebaseGISOnly,gisOnlyChanges,assertGISMerge,captureGISSnapshot,historicalGISMaster,currentGISDate,gisCycleAt,assertGISMasterStructure,assertGISMasterEdit,assertGISBlockActive} from './gis-model.js?v=gis-pages-3';
 import {checkHKEntries} from './hk-entry-check.js';
 import {purgeExpiredTrash} from './trash-retention.js';
@@ -707,7 +708,12 @@ function susunMeta() {
 /** Mode lokal: halaman dibuka tanpa repo GitHub (mis. ujicoba di komputer). */
 export const modeLokal = () => !gh.lokasiRepo();
 
-export async function simpan(pesan,{gisOnly=false}={}) {
+let saving;
+export async function simpan(pesan,options={}) {
+ if(saving){await saving;if(state.belumDisimpan)return simpan(pesan,options);return state.data?.rev;}
+ const task=saveInternal(pesan,options);saving=task;try{return await task;}finally{if(saving===task)saving=null;}
+}
+async function saveInternal(pesan,{gisOnly=false}={}) {
   if (!state.data) throw new Error('Belum ada data yang dimuat.');
   if (!state.password) throw new Error('Password data belum dimasukkan.');
   state.gabungTerakhir = 0;
@@ -722,7 +728,8 @@ export async function simpan(pesan,{gisOnly=false}={}) {
     state.data.dibuat = new Date().toISOString().slice(0, 19);
     state.data.dari = namaPengisi() ? `Web — ${namaPengisi()}` : 'Web';
     const meta = susunMeta();
-    const amplop = await kunciAmplop(state.data, state.password, meta);
+    const saved={rev:state.data.rev,json:JSON.stringify(state.data),data:state.data,path:state.path,sha:state.sha,meta};
+    const amplop = await kunciAmplop(saved.data, state.password, meta);
 
     // Tanpa repo tidak ada tempat mengirim, jadi hasilnya diunduh sebagai
     // berkas (ujicoba di komputer sendiri).
@@ -736,14 +743,13 @@ export async function simpan(pesan,{gisOnly=false}={}) {
     }
 
     try {
-      state.sha = await gh.tulisFile(state.path, amplop, state.sha, judul);
-      state.meta = meta;
-      state.belumDisimpan = false;
-      state.dasarJson = JSON.stringify(state.data);
-      hapusDraf();   // input sudah aman di GitHub
-      perbaruiDaftar(meta).catch(() => { /* daftar hanya pelengkap tampilan */ });
-      return state.data.rev;
+      saved.sha = await gh.tulisFile(saved.path, amplop, saved.sha, judul);
+      const finished=finishSavedSnapshot(state,saved);
+      if(finished.current){if(finished.pending)tandaiBerubah();else hapusDraf();}   // input sudah aman di GitHub
+      perbaruiDaftar(meta,saved.path).catch(() => { /* daftar hanya pelengkap tampilan */ });
+      return saved.rev;
     } catch (e) {
+      if(state.data!==saved.data||state.path!==saved.path)throw e;
       state.data.rev -= 1;
       if (!e.bentrok || percobaan >= 2) throw e;
       const { isi, sha } = await gh.bacaFile(state.path);
@@ -850,10 +856,10 @@ export function gabungTiga(dasar, lokal, remote) {
   return hasil;
 }
 
-async function perbaruiDaftar(meta) {
+async function perbaruiDaftar(meta,path=state.path) {
   const { isi, sha } = await gh.bacaFile('data/daftar.json');
   const dataset = { ...(isi?.dataset || {}) };
-  dataset[state.path] = {
+  dataset[path] = {
     label: meta.label, aplikasi: meta.aplikasi, rev: meta.rev,
     diperbarui: meta.diperbarui, jumlah: meta.jumlah, periode: meta.periode,
   };
