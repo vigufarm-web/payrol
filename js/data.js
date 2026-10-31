@@ -1,4 +1,4 @@
-import {assertGISMerge,captureGISSnapshot,historicalGISMaster,currentGISDate,gisCycleAt,assertGISMasterStructure,assertGISMasterEdit,assertGISBlockActive} from './gis-model.js';
+import {assertGISMerge,captureGISSnapshot,historicalGISMaster,currentGISDate,gisCycleAt,assertGISMasterStructure,assertGISMasterEdit,assertGISBlockActive} from './gis-model.js?v=gis-pages-3';
 import {checkHKEntries} from './hk-entry-check.js';
 import {purgeExpiredTrash} from './trash-retention.js';
 // data.js — isi database dipegang di memori, dibaca & disimpan ke repo GitHub.
@@ -263,7 +263,7 @@ export async function pulihkanCadanganLokal(id) {
   data.rev = Math.max(Number(state.data?.rev) || 0, Number(data.rev) || 0);
   state.data = data;
   gh.setTokenBersama(data.web?.token || '');
-  Promise.all([import('./gis-panel.js?v=gis-pages-2'),import('./pengguna.js')]).then(([m,p])=>m.startGISAuto({D:{state},app:'payrol',isAdmin:p.adalahAdmin,canEdit:()=>!!gh.ambilToken(),markChanged:tandaiBerubah})).catch(()=>{});
+  Promise.all([import('./gis-panel.js?v=gis-pages-3'),import('./pengguna.js')]).then(([m,p])=>m.startGISAuto({D:{state},app:'payrol',isAdmin:p.adalahAdmin,canEdit:()=>!!gh.ambilToken(),markChanged:tandaiBerubah})).catch(()=>{});
   tandaiBerubah();
   return data;
 }

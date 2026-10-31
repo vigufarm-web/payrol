@@ -1,4 +1,4 @@
-import {mountGISPanel} from './gis-panel.js?v=gis-pages-2';
+import {mountGISPanel} from './gis-panel.js?v=gis-pages-3';
 // sistem.js — halaman Pengaturan (mode edit, token, dataset) dan
 // Riwayat perubahan (diambil dari daftar commit repo).
 
