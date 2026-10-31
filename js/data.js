@@ -144,6 +144,7 @@ export function blokLainKomoditas(divisionId, blockIds) {
  */
 export function barisAktif(r) {
   if (r == null) return false;
+  if(r.gis_active===false||(r.gis_canonical_local_id!=null&&String(r.gis_canonical_local_id)!==String(r.id)))return false;
   if ('status' in r) return (r.status ?? 'Aktif') === 'Aktif';
   if ('aktif' in r) return Number(r.aktif) === 1;
   return true;
