@@ -1,5 +1,5 @@
 // No credentials or network access. Numeric local identities never become GIS IDs.
-const norm=v=>String(v??'').trim().replace(/\s*\((?:PC|R\d+)\)\s*$/i,'').toLowerCase();
+const norm=v=>String(v??'').trim().replace(/\s*\((?:PC|R\d+)\)\s*$/i,'').toLowerCase().replace(/^p0*(\d+)$/,'p$1');
 export function localBlocks(data,app){return (data.tabel?.[app==='payrol'?'blocks':'master_blok']||[]).map(r=>({id:r.id,name:app==='payrol'?r.nama_blok:r.nama,commodity:app==='payrol'?(r.komoditas||(data.tabel?.divisions||[]).find(d=>String(d.id)===String(r.division_id))?.nama_divisi):r.divisi,area:app==='payrol'?r.luas:r.luas_ha,planted_on:app==='payrol'?data.web?.tanamBlok?.[r.id]||null:null}));}
 function plantingDate(b,at='9999-12-31'){const groups=(b.plantings||[]).filter(p=>(!p.closed_on||p.closed_on>at)&&(!p.planted_on||p.planted_on<=at)),dates=[...new Set(groups.map(p=>p.planted_on).filter(Boolean))];return {date:dates.length===1&&groups.every(p=>p.planted_on)?dates[0]:null,multiple:dates.length>1};}
 export function buildGISPlan(data,catalog,app,manualMappings={}){
