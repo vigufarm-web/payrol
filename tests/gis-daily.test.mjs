@@ -49,4 +49,5 @@ test('failed GIS save retries without re-fetching and will not discard human inp
  const D={state:{data:source(),path:'data/payroll.json',belumDisimpan:false}};let attempts=0,reads=0;const opts={D,app:'payrol',canEdit:()=>true,markChanged:()=>D.state.belumDisimpan=true,save:async()=>{attempts++;if(attempts===1)throw Error('offline write');D.state.belumDisimpan=false;},load:async()=>{reads++;return catalog();},clock:()=>'2026-10-31T00:00:00Z'};
  await assert.rejects(synchronizeGIS(opts),/offline write/);assert.ok(D.state.gisPending);assert.equal((await synchronizeGIS(opts)).persisted,true);assert.equal(attempts,2);assert.equal(reads,1);assert.equal(D.state.gisPending,undefined);
  attempts=0;D.state.data=source();await assert.rejects(synchronizeGIS(opts),/offline write/);D.state.data.tabel.hk.push({id:99,jumlah:8});assert.equal((await synchronizeGIS(opts)).deferred,true);assert.equal(attempts,1);assert.ok(D.state.data.tabel.hk.some(r=>r.id===99));
+ D.state.belumDisimpan=false;assert.equal((await synchronizeGIS(opts,{force:true})).persisted,true);assert.equal(D.state.gisPending,undefined);assert.ok(D.state.data.tabel.hk.some(r=>r.id===99));
 });
