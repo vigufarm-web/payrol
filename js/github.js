@@ -74,7 +74,7 @@ async function minta(metode, url, isi, token) {
   if (isi) kepala['Content-Type'] = 'application/json';
   let r;
   try {
-    r = await fetch(url, { method: metode, headers: kepala, body: isi ? JSON.stringify(isi) : undefined });
+    r = await fetch(url, { cache: 'no-store', method: metode, headers: kepala, body: isi ? JSON.stringify(isi) : undefined });
   } catch {
     throw new Error('Tidak bisa menghubungi GitHub. Periksa koneksi internet.');
   }
