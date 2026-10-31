@@ -46,11 +46,14 @@ export function setLokasiRepo(owner, repo, branch = 'main') {
 let tokenBersama = '';
 export const setTokenBersama = (t) => { tokenBersama = String(t || '').trim(); };
 
-export const adaTokenLokal = () => !!localStorage.getItem(kunciToken())||(!tokenBersama&&!!localStorage.getItem('app.token')); 
-export const ambilToken = () => localStorage.getItem(kunciToken()) || tokenBersama || localStorage.getItem('app.token') || ''; // legacy never overrides the dataset's own shared credential
+function tokenLamaSesuaiRepo(){
+ try{const old=JSON.parse(localStorage.getItem('app.repo')||'null'),current=lokasiRepo();return old&&current&&String(old.owner).toLowerCase()===String(current.owner).toLowerCase()&&old.repo===current.repo?localStorage.getItem('app.token')||'':'';}catch{return '';}
+}
+export const adaTokenLokal = () => !!localStorage.getItem(kunciToken())||(!tokenBersama&&!!tokenLamaSesuaiRepo());
+export const ambilToken = () => localStorage.getItem(kunciToken()) || tokenBersama || tokenLamaSesuaiRepo();
 export const simpanToken = (t) => {
   if (t) localStorage.setItem(kunciToken(), t.trim());
-  else localStorage.removeItem(kunciToken());
+  else {localStorage.removeItem(kunciToken());if(tokenLamaSesuaiRepo())localStorage.removeItem('app.token');}
 };
 
 function pesanGalat(kode, badan) {
