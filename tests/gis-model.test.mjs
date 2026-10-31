@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {buildGISPlan,applyGISPlan,transactionGISSnapshot,captureGISSnapshot,historicalGISMaster,currentGISDate,assertGISMasterEdit,assertGISBlockActive,createGISLocalBlocks,assertGISMerge,assertGISMasterStructure} from '../js/gis-model.js';
+import {buildGISPlan,applyGISPlan,transactionGISSnapshot,captureGISSnapshot,historicalGISMaster,currentGISDate,assertGISMasterEdit,assertGISBlockActive,createGISLocalBlocks,assertGISMerge,assertGISMasterStructure,setGISGeneralLocations} from '../js/gis-model.js';
 const catalog=()=>({schema:1,revision:'revision-1',blocks:[{id:'permanent-gis-id',name:'A01-new',aliases:['A01'],commodity:'Pisang',active:true,gis_area_ha:2,owned_area_ha:1.5,version:2,plantings:[{planted_on:'2025-05-22'}]}]});
 const payroll=()=>({web:{tanamBlok:{17:'2025-05-22'}},tabel:{blocks:[{id:17,nama_blok:'A01',luas:2,komoditas:'Pisang',division_id:3}],divisions:[{id:3,nama_divisi:'Pisang'}],daily_payroll:[{id:10,block_id:17,hk:1,nominal:100000,tanggal:'2026-10-01'}]}});
 test('reviewed GIS mapping keeps local numeric IDs, old quantities and original reference snapshots',()=>{
@@ -42,3 +42,5 @@ test('GIS authority prevents local master creation, deletion, edits and unmapped
  assert.doesNotThrow(()=>assertGISBlockActive(d,'payrol',{block_id:17}));
  assert.equal(d.tabel.daily_payroll[0].nominal,100000);
 });
+
+test('reviewed general locations stay usable without inventing GIS geometry or area',()=>{const d=payroll();d.tabel.blocks.push({id:99,nama_blok:'Nursery',luas:0,division_id:3});applyGISPlan(d,catalog(),'payrol');setGISGeneralLocations(d,'payrol',[99]);d.web.gis.authoritative=true;assert.doesNotThrow(()=>assertGISBlockActive(d,'payrol',{block_id:99}));assert.throws(()=>setGISGeneralLocations(d,'payrol',[17]),/Lokasi umum/);});
