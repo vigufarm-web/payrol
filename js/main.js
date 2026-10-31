@@ -69,7 +69,7 @@ D.saatBerubah(() => {
   if (!autoSimpanAktif() || D.modeLokal() || !bisaEdit()) return;
   clearTimeout(timerAutoSimpan);
   timerAutoSimpan = setTimeout(async () => {
-    if (sedangAutoSimpan || !D.state.belumDisimpan) return;
+    if (sedangAutoSimpan || D.state.gisSaving || !D.state.belumDisimpan) return;
     sedangAutoSimpan = true;
     try { await simpanSekarang('Web: simpan otomatis'); }
     finally { sedangAutoSimpan = false; }
@@ -346,6 +346,7 @@ async function bangunKerangka() {
     el('main.utama', {}, [elKepala, elIsi]),
   ]));
   window.addEventListener('hashchange', gambar);
+  window.addEventListener('gis-updated',()=>{if(!document.querySelector('[role=dialog]'))gambar();});
   window.addEventListener('beforeunload', (e) => {
     if (D.state.belumDisimpan) { e.preventDefault(); e.returnValue = ''; }
   });

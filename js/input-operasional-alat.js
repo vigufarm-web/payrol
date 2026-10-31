@@ -46,7 +46,7 @@ const hmPakai = (r) => Math.max(0, (Number(r.hm_akhir) || 0) - (Number(r.hm_awal
 const kmPakai = (r) => Math.max(0, (Number(r.km_akhir) || 0) - (Number(r.km_awal) || 0));
 
 /** Daftar lokasi yang pernah dipakai, untuk saran pengisian. */
-const daftarLokasi = () => [...new Set(D.baris('work_logs').map((r) => r.lokasi).filter(Boolean))].sort();
+const daftarLokasi = () => [...new Set([...D.aktif('blocks').map(r=>r.nama_blok),...D.baris('work_logs').map(r=>r.lokasi).filter(name=>!D.baris('blocks').some(b=>b.gis_active===false&&b.nama_blok===name))].filter(Boolean))].sort();
 
 /** Pilihan unit/operator yang paling baru dan paling sering dipakai. */
 function referensiSering(tabelNama, kolom, opsi, batas = 7) {
@@ -639,7 +639,7 @@ function formSolar(barisAda, saatSelesai) {
   const riwayatSolar = D.baris('fuel_logs').filter((r) => !r.deleted_at);
   const inLokasi = pasangSaranRiwayat(
     el('input', { type: 'text', nilai: barisAda?.lokasi ?? '', autocomplete: 'off' }),
-    riwayatSolar.map((r) => ({ nilai: r.lokasi, tanggal: r.tanggal })),
+    [...D.aktif('blocks').map(r=>({nilai:r.nama_blok})),...riwayatSolar.map((r) => ({ nilai: r.lokasi, tanggal: r.tanggal }))],
   );
   const inCatatan = pasangSaranRiwayat(
     el('input', { type: 'text', nilai: barisAda?.catatan ?? '', autocomplete: 'off' }),

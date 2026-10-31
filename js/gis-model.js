@@ -21,13 +21,13 @@ export function applyGISPlan(data,catalog,app,{allowDateConflicts=false,automati
  // references used by existing transactions; never invent historical versions.
  g.legacy_baseline||={};g.approved_blocks||={};for(const l of localBlocks(data,app))g.legacy_baseline[l.id]||={...structuredClone(l),captured_at:now,historical_revision_unknown:true};
  let applied=0;
- for(const row of plan.rows){if(row.status!=='ready'&&!(allowDateConflicts&&['date-conflict','commodity-conflict'].includes(row.status)))continue;if(automatic&&row.newLink)continue;
+ for(const row of plan.rows){if(row.status!=='ready'&&!(allowDateConflicts&&['date-conflict','commodity-conflict','date-missing'].includes(row.status)))continue;if(automatic&&row.newLink)continue;
   const table=app==='payrol'?'blocks':'master_blok',local=data.tabel[table].find(r=>String(r.id)===String(row.local.id));
   const previous=localBlocks(data,app).find(r=>String(r.id)===String(local.id));
   const last=g.master_history[local.id]?.at(-1),changed=row.newLink||Object.values(row.changes).some(Boolean)||last?.gis_version!==row.gis.version||JSON.stringify(g.approved_blocks[row.gis.id])!==JSON.stringify(row.gis);
   if(!changed)continue;
   (g.master_history[local.id]||=[]).push({at:now,gis_id:row.gis.id,gis_version:row.gis.version,before:previous,after:{id:local.id,name:row.next.name,area:row.next.area,commodity:row.gis.commodity,planted_on:row.next.planted_on},multiple_plantings:row.next.multiplePlantings});
-  if(app==='payrol'){local.nama_blok=row.next.name;local.luas=row.next.area;local.komoditas=row.gis.commodity;local.division_id=row.next.division_id;if(row.next.planted_on){data.web.tanamBlok||={};data.web.tanamBlok[local.id]=row.next.planted_on;}}
+  if(app==='payrol'){local.nama_blok=row.next.name;local.luas=row.next.area;local.komoditas=row.gis.commodity;local.division_id=row.next.division_id;data.web.tanamBlok||={};if(row.next.planted_on)data.web.tanamBlok[local.id]=row.next.planted_on;else delete data.web.tanamBlok[local.id];}
   else{local.nama=row.next.name;local.luas_ha=row.next.area;local.divisi=row.gis.commodity;}
   g.approved_blocks[row.gis.id]=structuredClone(row.gis);
   local.gis_block_id=row.gis.id;local.gis_version=row.gis.version;local.gis_area_basis=row.next.basis;
@@ -38,7 +38,7 @@ export function applyGISPlan(data,catalog,app,{allowDateConflicts=false,automati
 }
 export function captureGISSnapshot(data,app,table,row,{replace=false,legacy=false,now=new Date().toISOString()}={}){
  const g=data.web?.gis;if(!g)return;g.snapshots||={};const key=table+':'+row.id;if(!replace&&g.snapshots[key])return;
- const locals=localBlocks(data,app),l=app==='payrol'?locals.find(b=>String(b.id)===String(row.block_id)):locals.find(b=>norm(b.name)===norm(row.blok));if(!l)return;
+ const locals=localBlocks(data,app),l=app==='payrol'?(locals.find(b=>String(b.id)===String(row.block_id))||locals.find(b=>b.canonical_local_id===b.id&&norm(b.name)===norm(row.lokasi))):locals.find(b=>norm(b.name)===norm(row.blok));if(!l)return;
  const id=g.mappings?.[l.id],b=g.approved_blocks?.[id]||g.catalog?.blocks?.find(b=>b.id===id);g.snapshots[key]={local_block_id:l.id,gis_block_id:id||null,gis_version:b?.version??null,name:l.name,area_ha:l.area??null,planted_on:l.planted_on,cycle:app==='payrol'?gisCycleAt(data,l.id,row.tanggal):null,planting_groups:(b?.plantings||[]).filter(p=>(!p.planted_on||p.planted_on<=(row.tanggal||g.catalog.as_of))&&(!p.closed_on||p.closed_on>(row.tanggal||g.catalog.as_of))).map(p=>({id:p.id,version:p.version,planted_on:p.planted_on,area_ha:p.area_ha})),recorded_at:now,legacy};
 }
 export function historicalGISMaster(data,localId,at){const history=data.web?.gis?.master_history?.[localId];if(!history?.length||!at)return null;const effective=history.filter(h=>h.at.slice(0,10)<=at).at(-1);return effective?.after||history[0].before;}
@@ -64,3 +64,56 @@ export function assertGISMerge(base,local,remote){const b=JSON.stringify(base.we
 export function transactionGISSnapshot(data,app,table,row){const g=data.web?.gis;if(!g)return null;const exact=g.snapshots?.[table+':'+row.id];if(exact)return exact;const l=app==='payrol'?localBlocks(data,app).find(l=>String(l.id)===String(row.block_id)):localBlocks(data,app).find(l=>norm(l.name)===norm(row.blok)||norm(g.legacy_baseline?.[l.id]?.name)===norm(row.blok));const base=l&&g.legacy_baseline?.[l.id];return base?{name:base.name,area_ha:base.area,planted_on:base.planted_on,legacy:true,historical_revision_unknown:true}:null;}
 
 export function setGISGeneralLocations(data,app,ids){data.web||={};data.web.gis||={};const valid=localBlocks(data,app);data.web.gis.general_locations=Object.fromEntries(ids.map(id=>{const l=valid.find(b=>String(b.id)===String(id));if(!l||Number(l.area)!==0||data.web.gis.mappings?.[id])throw Error('Lokasi umum harus tanpa luas dan belum dipetakan ke batas GIS.');return [id,true];}));}
+
+
+// Daily boundary is 06:00 Asia/Jakarta, independent of the device timezone.
+export function gisSyncDay(now=new Date().toISOString()) {
+ const ms=Date.parse(now);if(!Number.isFinite(ms))throw Error('Waktu sinkronisasi tidak valid.');
+ return new Date(ms+3600000).toISOString().slice(0,10);
+}
+export function gisSyncDue(data,now=new Date().toISOString()) {
+ return !!data?.web?.gis?.reference_access && data.web.gis.last_success_day!==gisSyncDay(now);
+}
+// Work on a copy. Invalid catalogs can never partially change live masters.
+export function automaticGISData(source,catalog,app,now=new Date().toISOString()) {
+ const data=structuredClone(source);buildGISPlan(data,catalog,app);for(const b of catalog.blocks)if(b.active&&(b.gis_area_ha==null||!Number.isFinite(Number(b.gis_area_ha))||Number(b.gis_area_ha)<0))throw Error('Luas GIS blok '+b.name+' tidak valid; referensi terakhir dipertahankan.');
+ data.tabel||={};data.web||={};const g=data.web.gis||={};g.mappings||={};
+ const table=app==='payrol'?'blocks':'master_blok',rows=data.tabel[table]||=[];
+ const divisions=data.tabel[app==='payrol'?'divisions':'master_divisi']||=[];
+ for(const name of new Set(catalog.blocks.filter(b=>b.active).map(b=>b.commodity).filter(Boolean))) {
+  const key=app==='payrol'?'nama_divisi':'nama';
+  if(!divisions.some(d=>norm(d[key])===norm(name))) {const id=divisions.reduce((m,r)=>Math.max(m,Number(r.id)||0),0)+1;divisions.push(app==='payrol'?{id,kode_divisi:'GIS-'+id,nama_divisi:name,status:'Aktif',sumber:'GIS'}:{id,nama:name,sumber:'GIS'});}
+ }
+ // Retain reviewed general locations. Recognize only explicit facility names;
+ // legacy coded plots without a GIS match remain historical, never guessed.
+ g.general_locations||={};
+ for(const l of localBlocks(data,app))if(!g.mappings[l.id]&&Number(l.area||0)===0&&/^(?:ph(?:\s|$)|packing(?:\s|$)|nurser[yi]$|barak(?:\s|$)|jalan kebun$|kantor$|gudang$|workshop$|pos security$|all area(?:\s|$)|semua area$)/i.test(l.name))g.general_locations[l.id]=true;
+ g.authoritative=true;
+ // Reuse only unambiguous existing names first, preserving numeric identities.
+ const first=applyGISPlan(data,catalog,app,{allowDateConflicts:true,now});
+ let created=0;
+ for(const b of catalog.blocks.filter(b=>b.active)) {
+  if(rows.some(r=>g.mappings[r.id]===b.id))continue;
+  const id=rows.reduce((m,r)=>Math.max(m,Number(r.id)||0),0)+1;
+  const division=divisions.find(d=>norm(d.nama_divisi)===norm(b.commodity));
+  rows.push(app==='payrol'?{id,kode_blok:b.name,nama_blok:b.name,division_id:division?.id,komoditas:b.commodity,status:'Aktif'}:{id,nama:b.name,divisi:b.commodity});
+  g.mappings[id]=b.id;created++;
+ }
+ const result=applyGISPlan(data,catalog,app,{allowDateConflicts:true,now});
+ g.auto=true;g.schedule='daily-0600-Asia-Jakarta-on-open';g.last_success_day=gisSyncDay(now);g.last_checked=now;
+ g.sync_error=null;return {data,applied:first.applied+result.applied,created,unmatched:result.unresolved.filter(r=>!g.general_locations[r.local.id]).length};
+}
+
+// A GIS-only save may be safely rebased on a concurrent staff transaction.
+// Any human input in the meantime disables this path; never discard it.
+export function gisOnlyChanges(base,local,app){
+ if(!local.web?.gis?.catalog)return false;
+ const expected=automaticGISData(base,local.web.gis.catalog,app,local.web.gis.last_checked).data;
+ const strip=value=>{const d=structuredClone(value);for(const k of ['rev','dibuat','dari'])delete d[k];d.web||={};delete d.web.gis;return JSON.stringify(d);};return strip(expected)===strip(local);
+}
+export function rebaseGISOnly(base,local,remote,app){
+ if(!gisOnlyChanges(base,local,app))throw Error('Input pengguna berubah selama sinkronisasi; simpan input terlebih dahulu.');
+ const l=local.web.gis,r=remote.web?.gis,chosen=r?.catalog&&r.last_checked>l.last_checked?r:l;
+ const result=automaticGISData(remote,chosen.catalog,app,chosen.last_checked).data;
+ result.web.gis.reference_access=structuredClone(l.reference_access||r?.reference_access);return result;
+}

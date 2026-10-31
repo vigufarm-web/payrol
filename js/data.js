@@ -1,4 +1,4 @@
-import {assertGISMerge,captureGISSnapshot,historicalGISMaster,currentGISDate,gisCycleAt,assertGISMasterStructure,assertGISMasterEdit,assertGISBlockActive} from './gis-model.js?v=gis-pages-3';
+import {rebaseGISOnly,gisOnlyChanges,assertGISMerge,captureGISSnapshot,historicalGISMaster,currentGISDate,gisCycleAt,assertGISMasterStructure,assertGISMasterEdit,assertGISBlockActive} from './gis-model.js?v=gis-pages-3';
 import {checkHKEntries} from './hk-entry-check.js';
 import {purgeExpiredTrash} from './trash-retention.js';
 // data.js — isi database dipegang di memori, dibaca & disimpan ke repo GitHub.
@@ -264,7 +264,7 @@ export async function pulihkanCadanganLokal(id) {
   data.rev = Math.max(Number(state.data?.rev) || 0, Number(data.rev) || 0);
   state.data = data;
   gh.setTokenBersama(data.web?.token || '');
-  Promise.all([import('./gis-panel.js?v=gis-pages-3'),import('./pengguna.js')]).then(([m,p])=>m.startGISAuto({D:{state},app:'payrol',isAdmin:p.adalahAdmin,canEdit:()=>!!gh.ambilToken(),markChanged:tandaiBerubah})).catch(()=>{});
+  
   tandaiBerubah();
   return data;
 }
@@ -554,6 +554,7 @@ export async function muat(password, path = state.path) {
   state.dasarJson = JSON.stringify(data);
   // token bersama (kalau admin menyimpannya di berkas) langsung berlaku
   gh.setTokenBersama(data.web?.token || '');
+  import('./gis-panel.js?v=gis-pages-3').then(m=>m.startGISAuto({D:{state},app:'payrol',canEdit:()=>!!gh.ambilToken(),markChanged:tandaiBerubah,save:simpanGIS})).catch(()=>{});
   return data;
 }
 
@@ -706,7 +707,7 @@ function susunMeta() {
 /** Mode lokal: halaman dibuka tanpa repo GitHub (mis. ujicoba di komputer). */
 export const modeLokal = () => !gh.lokasiRepo();
 
-export async function simpan(pesan) {
+export async function simpan(pesan,{gisOnly=false}={}) {
   if (!state.data) throw new Error('Belum ada data yang dimuat.');
   if (!state.password) throw new Error('Password data belum dimasukkan.');
   state.gabungTerakhir = 0;
@@ -749,7 +750,7 @@ export async function simpan(pesan) {
       if (!isi) throw e;
       const terbaru = await bukaAmplop(isi, state.password);
       const dasar = state.dasarJson ? JSON.parse(state.dasarJson) : terbaru;
-      state.data = gabungTiga(dasar, state.data, terbaru);
+      state.data = gisOnly&&gisOnlyChanges(dasar,state.data,'payrol')?rebaseGISOnly(dasar,state.data,terbaru,'payrol'):gabungTiga(dasar, state.data, terbaru);
       state.aplikasi = state.data.aplikasi || state.aplikasi;
       state.sha = sha;
       state.dasarJson = JSON.stringify(terbaru);
@@ -980,3 +981,5 @@ export function nomorBaru(tabel, prefix, tanggal) {
 }
 
 export const siklusGIS=(id,at)=>gisCycleAt(state.data,id,at);
+
+export async function simpanGIS(){if(state.gisSaving)return;state.gisSaving=true;try{return await simpan('Web: sinkron otomatis blok GIS',{gisOnly:true});}finally{state.gisSaving=false;}}

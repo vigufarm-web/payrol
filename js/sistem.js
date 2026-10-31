@@ -246,7 +246,7 @@ export function halamanSistem({ gambar, bisaEdit, muatUlangData, pengaturanAplik
     ]));
   }
 
-  mountGISPanel(wadah,{D,app:'payrol',isAdmin:P.adalahAdmin,canEdit:bisaEdit,markChanged:()=>D.setWeb(()=>{})});
+  mountGISPanel(wadah,{D,app:'payrol',isAdmin:P.adalahAdmin,canEdit:bisaEdit,markChanged:()=>D.setWeb(()=>{}),save:D.simpanGIS});
   return wadah;
 }
 
