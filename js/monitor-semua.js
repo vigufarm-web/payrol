@@ -590,7 +590,6 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
             kotak('Total HK pekerja', fhk(totalHk), 'HK'),
             kotak('Upah operasional', rupiah(upahOperasional), 'Rp'),
             kotak('Upah operator alat', rupiah(upahAlat), 'Rp'),
-            kotak('Solar + servis', rupiah(biayaUnit), 'Rp'),
             kotak('Total biaya', rupiah(upahOperasional + upahAlat + biayaUnit), 'Rp'),
           ]),
           el('p.bantuan.pantauan-catatan', {
@@ -612,8 +611,6 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
             { l: 'Upah pokok (Rp)', k: 'pokok', jenis: 'uang', total: true },
             { l: 'Lembur (Rp)', k: 'lembur', jenis: 'uang', total: true },
             { l: 'Premi (Rp)', k: 'premi', jenis: 'uang', total: true },
-            { l: 'Solar (Rp)', k: 'solar', jenis: 'uang', total: true },
-            { l: 'Servis (Rp)', k: 'servis', jenis: 'uang', total: true },
             { l: 'Total (Rp)', k: 'total', jenis: 'uang', total: true },
             { l: 'Menunggu acc', k: 'tunggu', jenis: 'angka', total: true },
           ], semuaDivisi, { kosong: `Belum ada data pada ${periode.judul()}.` }),
@@ -632,8 +629,6 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
                 { l: 'HM/Ltr', nilai: (r) => (r.hm_ltr == null ? '–' : angka(r.hm_ltr, 2)), rata: 'angka' },
                 { l: 'Upah operator (Rp)', k: 'upah', jenis: 'uang', total: true },
                 { l: 'Premi (Rp)', k: 'premi', jenis: 'uang', total: true },
-                { l: 'Solar (Rp)', k: 'solar', jenis: 'uang', total: true },
-                { l: 'Servis (Rp)', k: 'servis', jenis: 'uang', total: true },
                 { l: 'Total (Rp)', k: 'total', jenis: 'uang', total: true },
               ], barisUnit, { kosong: 'Belum ada kegiatan unit pada periode ini.' }),
               el('p.bantuan', {
