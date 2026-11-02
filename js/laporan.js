@@ -1,4 +1,4 @@
-import {payrollWorkers,groupPiecework} from './payroll-model.js?v=operasional-audit-1';
+import {payrollWorkers,groupPiecework,operatorPayroll} from './payroll-model.js?v=operasional-audit-1';
 // laporan.js — halaman laporan: Ringkasan, Payroll per pekerja, dan Rekap
 // biaya per divisi/blok/kegiatan. Semua angka dihitung dari data di memori.
 
@@ -35,8 +35,8 @@ const jumlah = (baris, kolom = 'nominal') => baris.reduce((n, r) => n + (Number(
 // =====================================================================
 // RINGKASAN
 // =====================================================================
-function kotakAngka(label, nilai, satuan = '') {
-  return el('div', {}, [
+function kotakAngka(label, nilai, satuan = '', attrs = {}) {
+  return el('div', attrs, [
     el('dt', { teks: label }),
     el('dd', {}, [nilai, satuan ? el('span.satuan', { teks: ' ' + satuan }) : null]),
   ]);
@@ -142,6 +142,14 @@ async function tempelAlatBerat(tempat, per) {
     unit.add(Number(r.unit_id));
   }
   // HK/log operasi langsung sah; hanya tambahan yang menunggu persetujuan.
+  if (!tempatAlat.isConnected) return;
+  const totalKebun = payrollWorkers(D.state.data, dari, sampai).reduce((n,r)=>n+r.total,0);
+  const totalOperator = operatorPayroll(alat, dari, sampai).reduce((n,r)=>n+r.total,0);
+  const totalBox = tempat.querySelector('[data-total-upah]');
+  if (totalBox) {
+    totalBox.querySelector('dd').replaceChildren(rupiah(totalKebun + totalOperator), el('span.satuan', {teks:' Rp'}));
+    totalBox.append(el('p.bantuan', {teks:`Kebun ${rupiah(totalKebun)} + ALB & kendaraan ${rupiah(totalOperator)}`}));
+  }
   if (!unit.size) { tempatAlat.remove(); return; }
 
   taruh(tempatAlat, el('div.lembar', {}, [
@@ -160,9 +168,7 @@ async function tempelAlatBerat(tempat, per) {
       el('p.bantuan', {
         teks: `${unit.size} unit beroperasi · ${angka(hkOp, 2)} HK operator · `
           + `${angka(hm, 1)} HM · ${angka(km, 1)} KM. `
-          + 'Angka ini TIDAK ikut dijumlahkan ke "Total upah" di atas — itu khusus '
-          + 'pekerja kebun. Log yang belum di-acc belum dihitung. Biaya solar & servis '
-          + 'ada di Laporan ALB & Kendaraan, bukan di sini.',
+          + 'Upah dan premi operator sudah termasuk Total upah di atas. Premi menunggu persetujuan belum dihitung.',
       }),
     ]),
   ]));
@@ -212,9 +218,9 @@ function isiRingkasan(periode) {
     el('div.lembar', {}, [
       el('dl.angka-utama', {}, [
         kotakAngka('Total HK', fhk(totalHk), 'HK'),
-        kotakAngka('Total upah', rupiah(total), 'Rp'),
+        kotakAngka('Total upah', rupiah(total), 'Rp', {'data-total-upah':''}),
         kotakAngka('Pekerja tercatat', angka(pekerjaAktif.size), `dari ${angka(D.aktif('employees').length)} aktif`),
-        kotakAngka('Rata-rata per pekerja', pekerjaAktif.size ? rupiah(total / pekerjaAktif.size) : '–', 'Rp'),
+        kotakAngka('Rata-rata pekerja kebun', pekerjaAktif.size ? rupiah(total / pekerjaAktif.size) : '–', 'Rp'),
       ]),
     ]),
 
