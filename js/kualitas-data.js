@@ -210,7 +210,7 @@ function pemeriksa(data, sekarang) {
         const seharusnya = Math.round(angka(r.qty) * angka(r.tarif_snapshot));
         if (!(angka(r.tarif_snapshot) > 0)) tambah({ tingkat: 'galat', jenis: 'Tarif nol', tabel, id: r.id,
           detail: `${r.nomor_transaksi || r.id}: tarif per satuan belum diisi.` });
-        if (angka(r.nominal) !== seharusnya) tambah({ tingkat: 'peringatan', jenis: 'Nilai tidak cocok', tabel, id: r.id,
+        if (Math.abs(angka(r.nominal) - seharusnya) > 1e-7) tambah({ tingkat: 'peringatan', jenis: 'Nilai tidak cocok', tabel, id: r.id,
           detail: `${r.nomor_transaksi || r.id}: tersimpan Rp ${angka(r.nominal)}, hitungan seharusnya Rp ${seharusnya}.` });
       }
     }
@@ -222,7 +222,7 @@ function pemeriksa(data, sekarang) {
       const seharusnya = Math.round(angka(r.hk) * angka(r.tarif_hk_snapshot));
       if (!(angka(r.tarif_hk_snapshot) > 0)) tambah({ tingkat: 'galat', jenis: 'Tarif HK nol', tabel: 'daily_payroll', id: r.id,
         detail: `${r.nomor_transaksi || r.id}: tarif HK belum diisi.` });
-      if (angka(r.nominal) !== seharusnya) tambah({ tingkat: 'peringatan', jenis: 'Upah HK tidak cocok', tabel: 'daily_payroll', id: r.id,
+      if (Math.abs(angka(r.nominal) - seharusnya) > 1e-7) tambah({ tingkat: 'peringatan', jenis: 'Upah HK tidak cocok', tabel: 'daily_payroll', id: r.id,
         detail: `${r.nomor_transaksi || r.id}: tersimpan Rp ${angka(r.nominal)}, hitungan seharusnya Rp ${seharusnya}.` });
     }
     for (const [k, total] of hkHari) if (total > batasHk + 1e-9) {
