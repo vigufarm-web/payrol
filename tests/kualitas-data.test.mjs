@@ -23,6 +23,12 @@ const hk = (id, nilai, job = 'Pengawasan sore') => ({
   nominal: Math.round(nilai * 100000), job,
 });
 
+test('floating point dust never flags stored pay as wrong or changes its value; a rupiah difference stays visible',()=>{
+ const data=dasar();data.tabel.daily_payroll.push({...hk(1,1),nominal:100000.00000000001});data.tabel.lembur_transactions.push({id:1,tanggal:'2026-10-01',employee_id:1,division_id:1,block_id:1,wage_component_id:1,qty:1,tarif_snapshot:10000,nominal:10000.000000000002,satuan:'jam'});
+ const original=JSON.stringify(data),issues=periksaData(data).masalah;assert.equal(issues.some(r=>['Upah HK tidak cocok','Nilai tidak cocok'].includes(r.jenis)),false);assert.equal(JSON.stringify(data),original);
+ data.tabel.daily_payroll[0].nominal=100001;data.tabel.lembur_transactions[0].nominal=10001;const wrong=periksaData(data).masalah;assert.ok(wrong.some(r=>r.jenis==='Upah HK tidak cocok'));assert.ok(wrong.some(r=>r.jenis==='Nilai tidak cocok'));
+});
+
 test('mendeteksi HK berlebih, referensi rusak, dan transaksi ganda', () => {
   const data = dasar();
   data.tabel.daily_payroll.push(hk(1, 0.75), hk(2, 0.75));
