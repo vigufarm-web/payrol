@@ -48,3 +48,10 @@ test('reviewed general locations stay usable without inventing GIS geometry or a
 test('Padi zero padding is normalized without changing IDs or merging ambiguous codes',()=>{const d=payroll(),c=catalog();d.tabel.blocks[0].nama_blok='P1';d.tabel.blocks[0].komoditas='Padi';d.tabel.divisions[0].nama_divisi='Padi';c.blocks[0].name='P01';c.blocks[0].aliases=[];c.blocks[0].commodity='Padi';c.blocks[0].plantings=[];assert.equal(buildGISPlan(d,c,'payrol').rows[0].gis.id,'permanent-gis-id');c.blocks.push({...c.blocks[0],id:'other',name:'P1'});assert.equal(buildGISPlan(d,c,'payrol').rows[0].status,'ambiguous');});
 
 test('duplicate local masters share one GIS identity but retain history and one operational choice',()=>{const d=payroll();d.tabel.blocks.push({...d.tabel.blocks[0],id:18});applyGISPlan(d,catalog(),'payrol');assert.equal(d.tabel.blocks[1].gis_canonical_local_id,17);assert.throws(()=>assertGISBlockActive(d,'payrol',{block_id:18}),/duplikat/);assert.doesNotThrow(()=>assertGISBlockActive(d,'payrol',{block_id:17}));assert.equal(d.tabel.daily_payroll[0].block_id,17);});
+
+test('active duplicate is selectable when older GIS alias is inactive, without changing historical transactions',()=>{
+ const d=payroll(),old=structuredClone(d.tabel.daily_payroll);d.tabel.blocks[0].status='Tidak Aktif';d.tabel.blocks.push({...d.tabel.blocks[0],id:18,status:'Aktif'});applyGISPlan(d,catalog(),'payrol');
+ assert.equal(d.tabel.blocks[0].gis_canonical_local_id,18);assert.equal(d.tabel.blocks[1].gis_canonical_local_id,18);assert.throws(()=>assertGISBlockActive(d,'payrol',{block_id:17}),/duplikat/);assert.doesNotThrow(()=>assertGISBlockActive(d,'payrol',{block_id:18}));assert.deepEqual(d.tabel.daily_payroll,old);
+ // Existing stored canonical values from a prior synchronization must also work.
+ d.tabel.blocks.forEach(r=>r.gis_canonical_local_id=17);assert.doesNotThrow(()=>assertGISBlockActive(d,'payrol',{block_id:18}));assert.throws(()=>assertGISBlockActive(d,'payrol',{block_id:17}),/duplikat/);
+});
