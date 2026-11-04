@@ -522,7 +522,9 @@ export function halamanMaster(namaTabel, { gambar, bisaEdit, kamus, hak }) {
         k: f.k,
         jenis: f.t === 'money' ? 'uang' : f.t === 'num' || f.t === 'int' ? 'angka' : 'teks',
         pecahan: f.t === 'num' ? 2 : 0,
-        nilai: f.t === 'ref'
+        nilai: namaTabel === 'blocks' && f.k === 'status'
+          ? (r) => !D.barisAktif(r) && (r.status ?? 'Aktif') === 'Aktif' ? 'Tidak dapat dipilih (GIS)' : (r.status ?? 'Aktif')
+          : f.t === 'ref'
           ? (r) => D.labelRef(f.ref, r[f.k])
           : f.t === 'pilih_angka'
             ? (r) => (f.pilihan.find((o) => Number(o.nilai) === Number(r[f.k]))?.label ?? r[f.k])
