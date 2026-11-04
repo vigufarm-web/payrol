@@ -1,5 +1,5 @@
 import {finishSavedSnapshot} from './save-state.js';
-import {rebaseGISOnly,gisOnlyChanges,assertGISMerge,captureGISSnapshot,historicalGISMaster,currentGISDate,gisCycleAt,assertGISMasterStructure,assertGISMasterEdit,assertGISBlockActive} from './gis-model.js?v=gis-pages-3';
+import {rebaseGISOnly,gisOnlyChanges,assertGISMerge,captureGISSnapshot,historicalGISMaster,currentGISDate,gisCycleAt,assertGISMasterStructure,assertGISMasterEdit,assertGISBlockActive,canonicalGISLocalId} from './gis-model.js?v=gis-pages-3';
 import {checkHKEntries} from './hk-entry-check.js';
 import {purgeExpiredTrash} from './trash-retention.js';
 // data.js — isi database dipegang di memori, dibaca & disimpan ke repo GitHub.
@@ -145,7 +145,8 @@ export function blokLainKomoditas(divisionId, blockIds) {
  */
 export function barisAktif(r) {
   if (r == null) return false;
-  if(r.gis_active===false||(r.gis_canonical_local_id!=null&&String(r.gis_canonical_local_id)!==String(r.id)))return false;
+  const canonical=baris('blocks').includes(r)?(canonicalGISLocalId(state.data||{},'payrol',r.id)??r.gis_canonical_local_id):r.gis_canonical_local_id;
+  if(r.gis_active===false||(canonical!=null&&String(canonical)!==String(r.id)))return false;
   if ('status' in r) return (r.status ?? 'Aktif') === 'Aktif';
   if ('aktif' in r) return Number(r.aktif) === 1;
   return true;
