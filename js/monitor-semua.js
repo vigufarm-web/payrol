@@ -190,7 +190,7 @@ function hitungAlat(data, dari, sampai) {
     // tanpa catatan solar efisiensinya belum bisa dihitung — jangan tampilkan 0
     ltr_km: b.km > 0 && b.liter > 0 ? b.liter / b.km : null,
     hm_ltr: b.liter > 0 && b.hm > 0 ? b.hm / b.liter : null,
-    total: b.upah + b.premi + b.solar + b.servis,
+    total: b.upah + b.premi,
   })).sort((a, b) => String(a.kategori).localeCompare(String(b.kategori), 'id')
     || String(a.unit).localeCompare(String(b.unit), 'id'));
 }
@@ -456,7 +456,7 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
           [S.teksT(`${mentahOp.length} baris`), ...Array(11).fill(S.teksT('')),
             S.uangT(mentahOp.filter((r) => r.acc === 'Sudah acc')
               .reduce((n, r) => n + nol(r.nominal), 0)),
-            S.teksT('(hanya yang sudah acc)'), ...Array(5).fill(S.teksT(''))],
+            S.teksT('(lihat status transaksi)'), ...Array(5).fill(S.teksT(''))],
         ],
       });
 
@@ -475,9 +475,9 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
             S.teks(r.keterangan), S.teks(r.acc),
             S.teks(r.nomor), S.teks(r.dibuatOleh), S.teks(r.dibuat), S.teks(r.diubah)]),
           [S.teksT(`${mentahAl.length} baris`), ...Array(9).fill(S.teksT('')),
-            S.uangT(mentahAl.filter((r) => r.acc === 'Sudah acc')
+            S.uangT(mentahAl.filter((r) => r.jenis === 'Log kerja' && !r.acc.startsWith('Dihapus'))
               .reduce((n, r) => n + nol(r.biaya), 0)),
-            S.teksT('(hanya yang sudah acc)'), ...Array(5).fill(S.teksT(''))],
+            S.teksT('(lihat status transaksi)'), ...Array(5).fill(S.teksT(''))],
         ],
       });
 
@@ -560,7 +560,7 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
         servis: jml(barisUnit, 'servis'),
         tunggu: tungguAlat,
         tungguRp: 0,
-        total: upahAlat + biayaUnit,
+        total: upahAlat,
       });
     }
 
@@ -590,7 +590,7 @@ export function halamanMonitorSemua({ periode: periodeBulan }) {
             kotak('Total HK pekerja', fhk(totalHk), 'HK'),
             kotak('Upah operasional', rupiah(upahOperasional), 'Rp'),
             kotak('Upah operator alat', rupiah(upahAlat), 'Rp'),
-            kotak('Total biaya', rupiah(upahOperasional + upahAlat + biayaUnit), 'Rp'),
+            kotak('Total upah', rupiah(upahOperasional + upahAlat), 'Rp'),
           ]),
           el('p.bantuan.pantauan-catatan', {
             teks: 'Angka hanya memuat transaksi yang sudah disetujui. Kolom "Menunggu acc" '
