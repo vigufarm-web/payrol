@@ -778,6 +778,15 @@ async function saveInternal(pesan,{gisOnly=false}={}) {
  */
 export function gabungTiga(dasar, lokal, remote) {
   assertGISMerge(dasar,lokal,remote);
+  const same=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
+  const oldUsers=dasar.web?.pengguna||{}, localUsers=lokal.web?.pengguna||{}, remoteUsers=remote.web?.pengguna||{};
+  const normUser=u=>String(u?.username||u?.nama||'').trim().replace(/\s+/g,' ').toLowerCase();
+  for(const [id,user] of Object.entries(localUsers)) {
+    const old=oldUsers[id], other=remoteUsers[id];
+    if (!old || same(old,user)) continue;
+    if (!same(old,other) && !same(user,other)) throw Error('Akun telah diubah di perangkat lain. Perubahan belum disimpan; periksa dan muat ulang data.');
+    if(normUser(user)!==normUser(old) && Object.entries(remoteUsers).some(([otherId,u])=>otherId!==id&&normUser(u)===normUser(user))) throw Error('Username sudah dipakai di perangkat lain. Pilih username lain.');
+  }
   const hasil = JSON.parse(JSON.stringify(remote));
   hasil.tabel ||= {};
   const beda = (a, b) => JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);

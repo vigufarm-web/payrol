@@ -14,6 +14,25 @@ import { el, tabel, isian, panel, tanya, pesan, kosongkan, kesalahan } from './u
 import { mintaPin, periksaPinAdmin, adminPinTerpasang, hashPin } from './kebun.js';
 
 const KUNCI_SESI = 'app.siapa';
+export const normalLogin = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+export const usernameLogin = p => String(p?.username || p?.nama || '').trim();
+export function usernameTersedia(pengguna, id, nama) {
+  const cek = normalLogin(nama);
+  return !!cek && !Object.entries(pengguna || {}).some(([k, p]) => k !== id && normalLogin(usernameLogin(p)) === cek);
+}
+export async function siapkanAkunSendiri(pengguna,id,lama,baru,ulang,username) {
+  const p=pengguna?.[id];
+  username=String(username||'').trim(); baru=String(baru||'').trim(); ulang=String(ulang||'').trim();
+  if (!p || p.aktif===false || !p.pin) throw Error('Akun tidak aktif atau belum memiliki PIN. Hubungi admin.');
+  const cek=await hashPin(lama,p.pin.salt);
+  if (cek.hash!==p.pin.hash) throw Error('PIN/password lama salah.');
+  if (!baru && !username) throw Error('Isi username baru atau PIN/password baru.');
+  if (username && !/^[A-Za-z0-9_.-]{2,40}$/.test(username)) throw Error('Username harus 2–40 huruf/angka, titik, garis bawah atau tanda minus.');
+  if (username && !usernameTersedia(pengguna,id,username)) throw Error('Username sudah dipakai.');
+  if (baru && baru.length<4) throw Error('PIN/password baru minimal 4 karakter.');
+  if (baru!==ulang) throw Error('Ulangi PIN/password baru dengan tepat.');
+  return {...p,username:username||p.username,pin:baru?await hashPin(baru):p.pin};
+}
 
 export const HAK = [
   ['input', 'Input baru', 'Boleh menambah HK, borongan, lembur, premi, log alat'],
@@ -300,15 +319,15 @@ export async function pilihPengguna({ wajib = true } = {}) {
     // nama DIKETIK, bukan dipilih dari daftar — supaya siapa saja yang punya
     // akses tidak bisa dilihat orang lain dari layar masuk
     const inNama = el('input', { type: 'text', autocomplete: 'off', spellcheck: false });
-    const inPin = el('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off' });
-    const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const inPin = el('input', { type: 'password', autocomplete: 'current-password' });
+    const norm = normalLogin;
 
     const gagalMasuk = () => {
       // sengaja tidak membedakan nama tak terdaftar vs PIN keliru,
       // supaya nama pengguna tidak bisa ditebak-tebak dari layar ini
-      kosongkan(tempatGalat).append(kesalahan(['Nama atau PIN salah.']));
+      kosongkan(tempatGalat).append(kesalahan(['Username atau PIN/password salah.']));
       tempatGalat.append(el('p.bantuan', {
-        teks: 'Nama harus persis seperti yang didaftarkan admin (huruf besar/kecil bebas). '
+        teks: 'Masukkan username Anda (huruf besar/kecil bebas). '
           + 'Kalau akun Anda baru saja dibuat, daftar terbaru sudah diambil otomatis — '
           + 'coba sekali lagi, atau muat ulang halaman (Ctrl+Shift+R).',
       }));
@@ -334,13 +353,13 @@ export async function pilihPengguna({ wajib = true } = {}) {
 
     const masuk = async (lagi = false) => {
       kosongkan(tempatGalat);
-      let cocok = orang.find((x) => norm(x.nama) === norm(inNama.value));
+      let cocok = orang.find((x) => norm(usernameLogin(x)) === norm(inNama.value));
       if (!cocok && !lagi && await segarkanDaftar()) { await masuk(true); return; }
       if (!cocok) { gagalMasuk(); return; }
       const p = semua()[cocok.id];
       if (p.pin) {
         const { hash } = await hashPin(inPin.value, p.pin.salt);
-        if (hash !== p.pin.hash) { gagalMasuk(); return; }
+        if (hash !== p.pin.hash) { if (!lagi && await segarkanDaftar()) { await masuk(true); return; } gagalMasuk(); return; }
       }
       sessionStorage.setItem(KUNCI_SESI, cocok.id);
       // nama pengisi ikut nama pengguna, supaya jejak di tiap baris &
@@ -366,9 +385,8 @@ export async function pilihPengguna({ wajib = true } = {}) {
 
     const pan = panel('Siapa yang mengisi?', el('div', {}, [
       tempatGalat,
-      el('p', { teks: 'Ketik nama Anda persis seperti yang didaftarkan, supaya tiap baris '
-        + 'tercatat atas nama Anda dan hanya divisi Anda yang terbuka untuk diubah.' }),
-      isian('Nama *', inNama),
+      el('p', { teks: 'Ketik username Anda. Nama pencatat dan hak akses tetap mengikuti akun Anda.' }),
+      isian('Username *', inNama),
       isian('PIN', inPin, { bantuan: 'Kosongkan kalau nama Anda belum dipasangi PIN.' }),
       wajib
         ? el('p.bantuan', { teks: 'Harus masuk dulu — tanpa nama, isi situs tidak ditampilkan.' })
@@ -377,6 +395,30 @@ export async function pilihPengguna({ wajib = true } = {}) {
 
     setTimeout(() => inNama.focus(), 50);
   });
+}
+
+// Perubahan dari bagian lain ditulis langsung ke berkas induk terbaru,
+// menggunakan SHA agar tidak menimpa transaksi atau pembaruan bersamaan.
+export async function simpanAkunPusat(id,lama,baru,ulang,username) {
+  const gh=await import('./github.js');
+  const {bukaAmplop,kunciAmplop}=await import('./kunci.js');
+  for(let n=0;n<3;n++) {
+    const {isi,sha}=await gh.bacaFile(BAGIAN_INDUK);
+    if(!isi || !sha) throw Error('Data akun pusat tidak ditemukan. Hubungi admin.');
+    let data;
+    try { data=await bukaAmplop(isi,D.state.password); }
+    catch { throw Error('Data akun pusat tidak dapat dibuka. Hubungi admin.'); }
+    const akun=await siapkanAkunSendiri(data.web?.pengguna,id,lama,baru,ulang,username);
+    if(D.state.belumDisimpan || sessionStorage.getItem(KUNCI_SESI)!==id) throw Error('Sesi atau data berubah; simpan dulu lalu coba kembali.');
+    data.web.pengguna[id]=akun;
+    data.rev=(Number(data.rev)||0)+1; data.dibuat=new Date().toISOString().slice(0,19); data.dari=`Web — ${akun.nama}`;
+    const meta={...(isi.meta||{}),rev:data.rev,diperbarui:data.dibuat,dari:data.dari};
+    const amplop=await kunciAmplop(data,D.state.password,meta);
+    try {
+      await gh.tulisFile(BAGIAN_INDUK,amplop,sha,`Web: perbarui akun sendiri (${akun.nama})`);
+      pusatCache=data.web.pengguna; D.lupakanBagianLain(); return data.rev;
+    } catch(e) { if(!e.bentrok || n===2) throw e; }
+  }
 }
 
 /**
@@ -392,55 +434,51 @@ export async function gantiPinSendiri() {
   const id = sessionStorage.getItem(KUNCI_SESI);
   const p = id ? semua()[id] : null;
   if (!p) { pesan('Masuk dulu dengan nama Anda untuk mengganti PIN.', 'awas', 6); return false; }
-  if (D.state.path !== BAGIAN_INDUK) {
-    pesan('Ganti PIN dilakukan dari bagian Payroll Operasional — daftar penggunanya '
-      + 'disimpan di sana. Pindah bagian dulu lewat tombol di menu kiri.', 'awas', 9);
-    return false;
-  }
 
   return new Promise((selesai) => {
     const tempatGalat = el('div');
-    const inLama = el('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off' });
-    const inBaru = el('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off' });
-    const inUlang = el('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off' });
+    const inLama = el('input', { type: 'password', autocomplete: 'current-password' });
+    const inUsername = el('input', { type: 'text', autocomplete: 'off', placeholder: 'Kosongkan jika tetap' });
+    const inBaru = el('input', { type: 'password', autocomplete: 'new-password' });
+    const inUlang = el('input', { type: 'password', autocomplete: 'new-password' });
 
+    let sibuk = false;
     const simpan = async () => {
+      if (sibuk) return;
+      sibuk = true;
       kosongkan(tempatGalat);
-      const salah = [];
+      let perubahanDibuat = false;
       const baru = inBaru.value.trim();
-      if (p.pin) {
-        const { hash } = await hashPin(inLama.value, p.pin.salt);
-        if (hash !== p.pin.hash) salah.push('PIN lama salah.');
-      }
-      if (!baru) salah.push('PIN baru harus diisi.');
-      else if (baru.length < 4) salah.push('PIN baru minimal 4 angka.');
-      else if (!/^\d+$/.test(baru)) salah.push('PIN hanya boleh angka.');
-      if (baru !== inUlang.value.trim()) salah.push('Ulangi PIN tidak sama dengan PIN baru.');
-      if (salah.length) { tempatGalat.append(kesalahan(salah)); return; }
-
-      const pinBaru = await hashPin(baru);
-      D.setWeb((w) => {
-        w.pengguna ||= {};
-        if (!w.pengguna[id]) return;
-        w.pengguna[id] = { ...w.pengguna[id], pin: pinBaru };
-      });
-      pan.tutup();
-      pesan(`PIN ${p.nama} diganti. Jangan lupa Simpan ke GitHub supaya berlaku `
-        + 'di perangkat lain.', 'sukses', 9);
-      selesai(true);
+      const username = inUsername.value.trim();
+      try {
+        if (D.modeLokal() || !(await import('./github.js')).ambilToken()) throw Error('Token GitHub diperlukan untuk menyimpan perubahan akun. Hubungi admin.');
+        if (D.state.belumDisimpan) throw Error('Simpan perubahan data yang belum tersimpan terlebih dahulu.');
+        if (D.state.path !== BAGIAN_INDUK) {
+          await simpanAkunPusat(id,inLama.value,baru,inUlang.value,username);
+          pan.tutup(); pesan('Akun berhasil disimpan ke GitHub.', 'sukses', 8); selesai(true); return;
+        }
+        const nilai=await siapkanAkunSendiri(semua(),id,inLama.value,baru,inUlang.value,username);
+        if (D.state.belumDisimpan || sessionStorage.getItem(KUNCI_SESI)!==id) throw Error('Sesi atau data berubah; coba kembali.');
+        D.setWeb(w => { w.pengguna ||= {}; w.pengguna[id]=nilai; });
+        perubahanDibuat = true;
+        await D.simpan('Web: perbarui akun sendiri');
+        pan.tutup(); pesan(D.state.belumDisimpan ? 'Akun tersimpan. Ada perubahan lain yang masih perlu disimpan.' : 'Akun berhasil disimpan ke GitHub.', 'sukses', 8); selesai(true);
+      } catch (e) { tempatGalat.append(kesalahan([e.message, ...(perubahanDibuat ? ['Perubahan akun belum tersimpan. Periksa status dan Simpan ke GitHub.'] : [])])); }
+      finally { sibuk = false; }
     };
     inUlang.addEventListener('keydown', (e) => { if (e.key === 'Enter') simpan(); });
 
-    const pan = panel('Ganti PIN saya', el('div', {}, [
+    const pan = panel('Akun saya', el('div', {}, [
       tempatGalat,
       el('p', { teks: `PIN untuk masuk sebagai ${p.nama}. Hanya Anda yang perlu tahu — `
         + 'admin pun tidak bisa melihatnya, hanya bisa menghapusnya kalau Anda lupa.' }),
       p.pin ? isian('PIN lama *', inLama) : null,
-      isian('PIN baru *', inBaru, { bantuan: 'Minimal 4 angka.' }),
-      isian('Ulangi PIN baru *', inUlang),
+      isian('Username baru (opsional)', inUsername),
+      isian('PIN/password baru (opsional)', inBaru, { bantuan: 'Minimal 4 karakter bila diubah.' }),
+      isian('Ulangi PIN/password baru', inUlang),
     ]), [
       el('button.tombol-samar', { type: 'button', teks: 'Batal', onclick: () => { pan.tutup(); selesai(false); } }),
-      el('button.tombol-utama', { type: 'button', teks: 'Simpan PIN', onclick: simpan }),
+      el('button.tombol-utama', { type: 'button', teks: 'Simpan akun', onclick: simpan }),
     ]);
     setTimeout(() => (p.pin ? inLama : inBaru).focus(), 50);
   });
@@ -623,6 +661,7 @@ async function formPengguna(id, saatSelesai) {
     const nama = inNama.value.trim();
     const salah = [];
     if (!nama) salah.push('Nama harus diisi.');
+    if ((!ada || !ada.username) && nama && !usernameTersedia(semua(), id, nama)) salah.push('Nama/username masuk sudah dipakai.');
 
     const akses = {};
     for (const b of cakupan) {
@@ -649,6 +688,7 @@ async function formPengguna(id, saatSelesai) {
     D.setWeb((w) => {
       w.pengguna ||= {};
       w.pengguna[kunci] = {
+        ...ada,
         nama,
         pin,
         admin: inAdmin.checked,
