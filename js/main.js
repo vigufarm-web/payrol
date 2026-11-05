@@ -444,7 +444,7 @@ function bangunMenu() {
       }) : null,
       // tiap orang mengurus PIN-nya sendiri, tidak perlu lewat admin
       P.adaPengguna() && P.siapa() ? el('button.tombol-samar.tombol-kecil', {
-        type: 'button', teks: 'Ganti PIN saya',
+        type: 'button', teks: 'Akun saya · ganti username/PIN',
         onclick: async () => { if (await P.gantiPinSendiri()) gambar(); },
       }) : null,
       el('button.tombol-samar.tombol-kecil', {
