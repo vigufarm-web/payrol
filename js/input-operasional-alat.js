@@ -409,12 +409,19 @@ function formLog(barisAda, tglAwal, saatSelesai) {
     // pada hari yang sama tanpa ada yang menegur — dan itu pernah terjadi.
     const op = D.cari('operators', opId);
     if (op && totalHk > 0) {
-      const peta = await D.petaHkBagianLain().catch(() => []);
+      D.lupakanBagianLain();
+      let peta;
+      try { peta = await D.petaHkBagianLain({wajibLengkap:true}); }
+      catch (e) { tempatGalat.append(kesalahan([e.message])); return; }
       const lintas = D.hkLintas(peta, { nama: op.nama, rekening: op.no_rekening },
         inTanggal.value);
       if (lintas) {
         const batas = D.maksHkPerHari();
         const jumlah = lintas.hk + totalHk;
+        if (jumlah > batas + 1e-9) {
+          tempatGalat.append(kesalahan([`${op.nama} pada ${ftanggal(inTanggal.value)}: total lintas bagian ${fhk(jumlah)} HK melebihi ${fhk(batas)} HK. Perbaiki HK sebelum menyimpan.`]));
+          return;
+        }
         const lanjut = await tanya(
           jumlah > batas + 1e-9 ? `${op.nama} jadi lebih dari ${fhk(batas)} HK hari itu`
             : `${op.nama} sudah punya HK di bagian lain hari itu`,

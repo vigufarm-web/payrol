@@ -3,7 +3,8 @@ import {checkHKEntries} from './hk-entry-check.js';
 import {tanya,el,hk as fhk,rupiahPenuh} from './ui.js';
 export async function confirmHKEntries(rows,options={}){
  const check=checkHKEntries(D.state.data,rows,options);
- const cross=await D.petaHkBagianLain().catch(()=>[]);
+ D.lupakanBagianLain();
+ const cross=await D.petaHkBagianLain({wajibLengkap:true});
  for(const g of check.groups){const other=D.hkLintas(cross,D.cari('employees',g.employee_id),g.tanggal);if(!other)continue;if(g.totalHK+other.hk>1+1e-9)throw Error(`${g.name} pada ${g.tanggal}: total termasuk ${other.bagian} menjadi ${g.totalHK+other.hk} HK. Maksimal 1 HK; penyimpanan ditolak.`);g.crossLabel=other.bagian;g.crossHK=other.hk;g.existingHK+=other.hk;g.totalHK+=other.hk;if(!check.repeats.includes(g))check.repeats.push(g);}
  if(!check.repeats.length)return true;
  const accepted=await tanya('Peringatan: pekerja sudah diinput pada tanggal ini',el('div',{},[

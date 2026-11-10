@@ -596,13 +596,20 @@ const rapiRek = (r) => String(r || '').replace(/[^0-9]/g, '');
  * Tujuannya satu: mencegah satu orang dibayar dua kali pada hari yang sama
  * dari dua bagian berbeda.
  */
-export async function petaHkBagianLain() {
+export async function petaHkBagianLain({wajibLengkap = false} = {}) {
   const per = [];   // [{ nama, rek, bagian, perTanggal: {tgl: hk} }]
   const dataset = state.daftar?.dataset || {};
+  const pasangan = state.aplikasi === 'PayrollHK' ? 'AlatBerat' : state.aplikasi === 'AlatBerat' ? 'PayrollHK' : null;
+  if (wajibLengkap && pasangan && !Object.entries(dataset).some(([path,meta]) => path !== state.path && meta?.aplikasi === pasangan)) {
+    throw new Error('Data bagian lain belum terdaftar. Pemeriksaan HK lintas bagian tidak dapat dilakukan.');
+  }
   for (const [path, meta] of Object.entries(dataset)) {
     if (path === state.path) continue;
     const lain = await muatBagianLain(path);
-    if (!lain?.tabel) continue;
+    if (!lain?.tabel) {
+      if (wajibLengkap && ['AlatBerat', 'PayrollHK'].includes(meta?.aplikasi)) throw new Error(`Data ${meta.label || path} belum dapat dibaca. Pemeriksaan HK lintas bagian tidak lengkap; muat ulang dan coba lagi.`);
+      continue;
+    }
     const label = meta.label || path;
 
     // Bagian Alat Berat: orangnya ada di tabel `operators`, hari kerjanya di
@@ -617,8 +624,7 @@ export async function petaHkBagianLain() {
       }
       for (const r of lain.tabel.work_logs || []) {
         if (r.deleted_at) continue;
-        const c = lain.web?.persetujuan?.work_logs?.[String(r.id)];
-        if (c && c.status !== 'disetujui') continue;     // belum di-acc: belum dihitung
+        // HK operator sudah berlaku; status acc hanya mengatur tambahan/premi.
         const o = op.get(Number(r.operator_id));
         if (!o) continue;
         o.perTanggal[r.tanggal] = (o.perTanggal[r.tanggal] || 0) + (Number(r.hk) || 0);

@@ -110,12 +110,18 @@ async function tempelAlatBerat(tempat, per) {
   if (D.state.aplikasi !== 'PayrollHK') return;
   // Jangan meminta berkas yang memang tidak terdaftar di daftar.json —
   // permintaannya akan dijawab 404 dan mengotori log galat tanpa guna.
-  if (!D.state.daftar?.dataset?.[JALUR_ALAT]) return;
   const tempatAlat = el('section');
   tempat.append(tempatAlat);
   let alat = null;
-  try { alat = await D.muatBagianLain(JALUR_ALAT); } catch { /* lewati */ }
-  if (!alat?.tabel?.work_logs) { tempatAlat.remove(); return; }
+  if (D.state.daftar?.dataset?.[JALUR_ALAT]) {
+    try { alat = await D.muatBagianLain(JALUR_ALAT); } catch { /* tampilkan peringatan */ }
+  }
+  if (!alat?.tabel?.work_logs) {
+    if (!tempatAlat.isConnected) return;
+    const box = tempat.querySelector('[data-total-upah]');
+    if (box) box.append(el('p.bantuan', {teks:'Baru upah kebun. Data Alat Berat & Kendaraan belum dapat dibaca; total gabungan belum tersedia.'}));
+    return;
+  }
 
   const [dari, sampai] = per.rentang();
   const nol = (v) => Number(v) || 0;
@@ -147,10 +153,34 @@ async function tempelAlatBerat(tempat, per) {
   const totalOperator = operatorPayroll(alat, dari, sampai).reduce((n,r)=>n+r.total,0);
   const totalBox = tempat.querySelector('[data-total-upah]');
   if (totalBox) {
+    totalBox.querySelector('dt').textContent = 'Total upah gabungan';
     totalBox.querySelector('dd').replaceChildren(rupiah(totalKebun + totalOperator), el('span.satuan', {teks:' Rp'}));
     totalBox.append(el('p.bantuan', {teks:`Kebun ${rupiah(totalKebun)} + ALB & kendaraan ${rupiah(totalOperator)}`}));
   }
-  if (!unit.size) { tempatAlat.remove(); return; }
+  if (P.adalahAdmin()) {
+    try {
+      const lintas = await D.petaHkBagianLain({wajibLengkap:true});
+      const cocok = new Map();
+      for (const r of hidup('daily_payroll')) {
+        if (r.tanggal < dari || r.tanggal > sampai) continue;
+        const pekerja = D.cari('employees', r.employee_id);
+        const lain = D.hkLintas(lintas, pekerja, r.tanggal);
+        if (!lain) continue;
+        const k = `${r.employee_id}|${r.tanggal}`;
+        const x = cocok.get(k) || {pekerja, tanggal:r.tanggal, hk:0, lain};
+        x.hk += Number(r.hk) || 0;
+        cocok.set(k, x);
+      }
+      if (tempatAlat.isConnected && cocok.size) tempatAlat.append(el('div.lembar', {}, [
+        el('div.lembar-isi', {}, [el('h2', {teks:'Peringatan HK lintas bagian'}),
+          el('p.bantuan',{teks:'Periksa pembagian HK dan identitas. Kecocokan nama tanpa rekening perlu diperiksa; data tidak diubah otomatis.'}),
+          ...[...cocok.values()].map(x=>el('p',{teks:`${x.pekerja?.nama || 'Pekerja'} · ${ftanggal(x.tanggal)}: kebun ${fhk(x.hk)} + ${x.lain.bagian} ${fhk(x.lain.hk)} = ${fhk(x.hk+x.lain.hk)} HK${x.lain.lemah?' · perlu cek identitas':''}`}))])
+      ]));
+    } catch {
+      if (tempatAlat.isConnected) tempatAlat.append(el('p.bantuan',{teks:'Pemeriksaan HK lintas bagian belum lengkap. Muat ulang dan periksa akses data.'}));
+    }
+  }
+  if (!unit.size) return;
 
   taruh(tempatAlat, el('div.lembar', {}, [
     el('div.lembar-kepala', {}, [el('h2', { teks: 'Alat Berat & Kendaraan' })]),
@@ -182,7 +212,8 @@ function isiRingkasan(periode) {
   const upahBorongan = jumlah(t.borongan);
   const upahLembur = jumlah(t.lembur);
   const upahPremi = jumlah(t.premi);
-  const total = upahHk + upahBorongan + upahLembur + upahPremi;
+  const [dari, sampai] = periode.rentang();
+  const total = payrollWorkers(D.state.data, dari, sampai).reduce((n, r) => n + r.total, 0);
 
   const pekerjaAktif = new Set([
     ...t.hk.map((r) => r.employee_id),
@@ -218,7 +249,7 @@ function isiRingkasan(periode) {
     el('div.lembar', {}, [
       el('dl.angka-utama', {}, [
         kotakAngka('Total HK', fhk(totalHk), 'HK'),
-        kotakAngka('Total upah', rupiah(total), 'Rp', {'data-total-upah':''}),
+        kotakAngka('Total upah kebun', rupiah(total), 'Rp', {'data-total-upah':''}),
         kotakAngka('Pekerja tercatat', angka(pekerjaAktif.size), `dari ${angka(D.aktif('employees').length)} aktif`),
         kotakAngka('Rata-rata pekerja kebun', pekerjaAktif.size ? rupiah(total / pekerjaAktif.size) : '–', 'Rp'),
       ]),
