@@ -213,13 +213,21 @@ export async function drafTersimpan() {
     if (!mentah || !state.data) return null;
     const { rev, waktu, amp } = JSON.parse(mentah);
     if (Number(rev) !== (Number(state.data.rev) || 0)) {
-      // sudah ada simpanan lebih baru (dari sini atau komputer lain) — basi
+      // Jangan pernah mengganti dataset terkini dengan draf lama, atau membuangnya.
+      // Simpan salinan terenkripsi terpisah sebelum melepas slot draf aktif.
+      const arsip=`app.draf.arsip.${state.path}.${Date.now()}`;
+      try { localStorage.setItem(arsip,mentah); } catch { throw new Error('Penyimpanan browser penuh. Draf lama masih ada; jangan tutup atau muat ulang.'); }
       localStorage.removeItem(kunciDraf());
-      return null;
+      return {basi:true,waktu,rev,arsip};
     }
     const isi = await bukaAmplop(amp, state.password);
     return { waktu, data: isi };
-  } catch { return null; }
+  } catch(e) { if(e.message?.includes('Penyimpanan browser penuh'))throw e;return null; }
+}
+export function unduhDrafArsip(kunci) {
+  if(!kunci.startsWith(`app.draf.arsip.${state.path}.`))throw Error('Arsip draf tidak sesuai dataset.');
+  const isi=localStorage.getItem(kunci);if(!isi)throw Error('Arsip draf tidak ditemukan.');
+  unduhTeks('draf-payrol-terenkripsi.json',isi,'application/json');
 }
 
 /** Pakai draf sebagai data aktif (belum tersimpan -> ikut simpan otomatis). */
@@ -803,6 +811,11 @@ export function gabungTiga(dasar, lokal, remote) {
     hasil.tabel[t] ||= [];
     const barisHasil = hasil.tabel[t];
     const petaHasil = new Map(barisHasil.map((r) => [Number(r.id), r]));
+    const petaLokal = new Map((lokal.tabel[t] || []).map((r) => [Number(r.id), r]));
+    for (const [id,asal] of barisDasar) {
+      const l=petaLokal.get(id),r=petaHasil.get(id);
+      if (beda(l,asal) && beda(r,asal) && beda(l,r)) throw Error(`Data ${t} nomor ${id} diubah pada perangkat lain. Perubahan belum disimpan; periksa dahulu.`);
+    }
     let maksId = 0;
     for (const r of barisHasil) maksId = Math.max(maksId, Number(r.id) || 0);
     const nomorAda = new Set(barisHasil.map((r) => r.nomor_transaksi).filter(Boolean));
@@ -839,10 +852,32 @@ export function gabungTiga(dasar, lokal, remote) {
     }
   }
 
+  // Pemeriksaan ulang setelah penggabungan mencegah dua perangkat memasukkan
+  // HK pekerja yang sama melebihi batas pada hari yang sama.
+  const baseHK=new Map((dasar.tabel?.daily_payroll||[]).map(r=>[Number(r.id),r]));
+  const checkRows=(lokal.tabel?.daily_payroll||[]).filter(r=>!r.deleted_at&&beda(r,baseHK.get(Number(r.id)))).map(r=>({...r,id:petaId.daily_payroll?.get(Number(r.id))??r.id})).filter(r=>Number(r.employee_id)>0&&r.tanggal&&Number(r.hk)>0);
+  if(checkRows.length)checkHKEntries(hasil,checkRows,{excludeIds:checkRows.map(r=>r.id)});
+
   // ---- pengaturan web
   hasil.web ||= {};
   const dW = dasar.web || {};
   const lW = lokal.web || {};
+  const gBase=dW.gis,gLocal=lW.gis,gRemote=remote.web?.gis;
+  const tanpaSnapshots=g=>{if(!g)return g;const salin=structuredClone(g);delete salin.snapshots;return salin;};
+  if(beda(tanpaSnapshots(gLocal),tanpaSnapshots(gBase)) && !beda(tanpaSnapshots(gRemote),tanpaSnapshots(gBase))) {
+    if(gLocal){const snapshots=hasil.web.gis?.snapshots;hasil.web.gis=structuredClone(gLocal);hasil.web.gis.snapshots=snapshots||{};}
+    else delete hasil.web.gis;
+  }
+  if(gLocal?.snapshots){
+    hasil.web.gis ||= {};hasil.web.gis.snapshots ||= {};
+    for(const [key,snapshot] of Object.entries(gLocal.snapshots)){
+      const asal=gBase?.snapshots?.[key];if(!beda(snapshot,asal))continue;
+      const match=key.match(/^(.+):(\d+)$/),t=match?.[1],id=match?.[2],baru=match&&petaId[t]?.get(Number(id));
+      const finalKey=baru!=null?`${t}:${baru}`:key,other=gRemote?.snapshots?.[finalKey];
+      if(baru==null&&beda(other,asal)&&beda(other,snapshot))throw Error('Riwayat referensi GIS transaksi yang sama berubah di perangkat lain. Periksa sebelum menyimpan.');
+      hasil.web.gis.snapshots[finalKey]=structuredClone(snapshot);
+    }
+  }
   for (const kunci of ['adminPin', 'token']) {
     if (!beda(lW[kunci], dW[kunci])) continue;
     if (lW[kunci] === undefined) delete hasil.web[kunci];
@@ -864,6 +899,8 @@ export function gabungTiga(dasar, lokal, remote) {
     for (const idK of Object.keys(lP[t] || {})) {
       if (!beda(lP[t][idK], (dP[t] || {})[idK])) continue;
       const idFinal = petaId[t]?.get(Number(idK)) ?? idK;
+      const sebelumnya=dP[t]?.[idK],remoteApproval=remote.web?.persetujuan?.[t]?.[idFinal];
+      if(String(idFinal)===String(idK)&&beda(remoteApproval,sebelumnya)&&beda(remoteApproval,lP[t][idK]))throw Error('Persetujuan transaksi yang sama berubah di perangkat lain. Periksa sebelum menyimpan.');
       hasil.web.persetujuan ||= {};
       hasil.web.persetujuan[t] ||= {};
       hasil.web.persetujuan[t][String(idFinal)] = lP[t][idK];

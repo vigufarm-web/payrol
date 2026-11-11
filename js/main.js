@@ -313,7 +313,13 @@ async function bangunKerangka() {
   sesuaikanPeriode();
   // ada input yang belum sempat terkirim (mis. listrik padam)? tawarkan pulih
   const draf = await D.drafTersimpan();
-  if (draf) {
+  if (draf?.basi) {
+    const unduh=await tanya('Draf belum tersimpan memerlukan pemeriksaan',el('div',{},[
+      el('p',{teks:`Draf ${waktu(draf.waktu)} dibuat dari versi lama, sementara data GitHub sudah berubah. Draf disimpan terpisah di browser agar data terbaru tidak tertimpa.`}),
+      el('p.bantuan',{teks:'Unduh cadangan terenkripsi untuk membantu pemeriksaan. Jangan menimpa data GitHub dengan berkas ini.'}),
+    ]),{ya:'Unduh draf',tidak:'Lanjutkan'});
+    if(unduh)D.unduhDrafArsip(draf.arsip);
+  } else if (draf) {
     const pulih = await tanya('Ada input yang belum tersimpan', el('div', {}, [
       el('p', { teks: `Perubahan terakhir ${waktu(draf.waktu)} belum sempat terkirim ke GitHub `
         + '(mis. listrik padam atau tab tertutup). Pulihkan dan lanjutkan dari situ?' }),
