@@ -189,19 +189,23 @@ function tandaiBerubah() {
 // ---------------------------------------------------------------------
 const kunciDraf = () => `app.draf.${state.path}`;
 let timerDraf = null;
+let versiDraf = 0;
 function jadwalkanDraf() {
   if (!state.password || !state.data) return;
+  const versi=++versiDraf;
   clearTimeout(timerDraf);
   timerDraf = setTimeout(async () => {
     try {
-      const amp = await kunciAmplop(state.data, state.password, { draf: true });
-      localStorage.setItem(kunciDraf(), JSON.stringify({
-        rev: Number(state.data.rev) || 0, waktu: new Date().toISOString(), amp }));
+      const data=state.data,path=state.path,rev=Number(data.rev)||0;
+      const amp = await kunciAmplop(data, state.password, { draf: true });
+      if(versi!==versiDraf||state.path!==path||state.data!==data||!state.belumDisimpan)return;
+      localStorage.setItem(`app.draf.${path}`, JSON.stringify({rev,waktu:new Date().toISOString(),amp}));
     } catch { /* penyimpanan penuh / terblokir — lewati saja */ }
   }, 2500);
 }
 
 export function hapusDraf() {
+  versiDraf++;
   clearTimeout(timerDraf);
   try { localStorage.removeItem(kunciDraf()); } catch { /* abaikan */ }
 }
