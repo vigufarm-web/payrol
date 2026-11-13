@@ -17,6 +17,12 @@ test('automatic refresh creates GIS commodities and blocks, preserves IDs and tr
  assert.ok(r.data.tabel.divisions.some(d=>d.nama_divisi==='Mangga'));assert.equal(r.created,1);assert.equal(r.data.web.gis.last_success_day,'2026-10-31');
  const again=automaticGISData(r.data,catalog(),'payrol','2026-10-31T01:00:00Z');assert.equal(again.created,0);assert.equal(again.applied,0);assert.equal(again.data.tabel.blocks.length,2);
 });
+test('Nursery Padi is a separate selectable general location, preserving Nursery Pisang and transactions',async()=>{
+ const {assertGISBlockActive}=await import('../js/gis-model.js');const d=source();d.tabel.divisions.push({id:2,nama_divisi:'Padi'});d.tabel.blocks.push({id:8,nama_blok:'Nursery',kode_blok:'Nursery-P',division_id:1,luas:0,status:'Aktif'});d.web.gis.last_success_day='2026-10-31';
+ assert.equal(gisSyncDue(d,'2026-10-31T01:00:00Z'),true);const a=automaticGISData(d,catalog(),'payrol','2026-10-31T01:00:00Z').data,padi=a.tabel.blocks.find(r=>r.nama_blok==='Nursery Padi');
+ assert.ok(padi);assert.equal(padi.division_id,2);assert.equal(padi.gis_active,true);assert.equal(a.web.gis.general_locations[padi.id],true);assert.deepEqual(a.tabel.hk,d.tabel.hk);assert.doesNotThrow(()=>assertGISBlockActive(a,'payrol',{block_id:padi.id}));assert.doesNotThrow(()=>assertGISBlockActive(a,'payrol',{block_id:8}));
+ const again=automaticGISData(a,catalog(),'payrol','2026-10-31T02:00:00Z').data;assert.equal(again.tabel.blocks.filter(r=>r.nama_blok==='Nursery Padi').length,1);assert.equal(gisSyncDue(again,'2026-10-31T02:00:00Z'),false);
+});
 test('automatic refresh follows permanent identities for renames, inactivation and same-name blocks',()=>{
  let r=automaticGISData(source(),catalog(),'payrol').data;const c=catalog();c.revision='r2';c.blocks[0].name='A01-baru';c.blocks[0].active=false;c.blocks.push({...c.blocks[1],id:'uuid-M2'});
  r=automaticGISData(r,c,'payrol').data;assert.equal(r.tabel.blocks.find(b=>b.id===7).gis_active,false);assert.equal(Object.values(r.web.gis.mappings).filter(id=>id==='uuid-M2').length,1);assert.equal(r.tabel.blocks.filter(b=>b.nama_blok==='M01').length,2);
