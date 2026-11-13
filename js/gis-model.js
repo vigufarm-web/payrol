@@ -82,8 +82,13 @@ export function gisSyncDay(now=new Date().toISOString()) {
  return new Date(ms+3600000).toISOString().slice(0,10);
 }
 export function gisSyncDue(data,now=new Date().toISOString()) {
- return !!data?.web?.gis?.reference_access && data.web.gis.last_success_day!==gisSyncDay(now);
+ const rows=data?.tabel?.blocks,divisions=data?.tabel?.divisions;
+ const missing=Array.isArray(rows)&&Array.isArray(divisions)&&nurseryPadiMissing(rows,divisions);
+ const pending=Array.isArray(rows)&&rows.some(r=>nurseryName(r.nama_blok)&&Number(r.luas||0)===0&&!data?.web?.gis?.mappings?.[r.id]&&!data?.web?.gis?.general_locations?.[r.id]);
+ return !!data?.web?.gis?.reference_access && (missing||pending||data.web.gis.last_success_day!==gisSyncDay(now));
 }
+const nurseryName=name=>/^(?:nurser[yi]|nurser[yi] (?:padi|pisang))$/i.test(String(name||'').trim());
+function nurseryPadiMissing(rows,divisions){const padi=divisions.find(d=>norm(d.nama_divisi)==='padi');return !!padi&&!rows.some(r=>String(r.division_id)===String(padi.id)&&nurseryName(r.nama_blok))&&!rows.some(r=>norm(r.nama_blok)==='nursery padi');}
 // Work on a copy. Invalid catalogs can never partially change live masters.
 export function automaticGISData(source,catalog,app,now=new Date().toISOString()) {
  const data=structuredClone(source);buildGISPlan(data,catalog,app);for(const b of catalog.blocks)if(b.active&&(b.gis_area_ha==null||!Number.isFinite(Number(b.gis_area_ha))||Number(b.gis_area_ha)<0))throw Error('Luas GIS blok '+b.name+' tidak valid; referensi terakhir dipertahankan.');
@@ -97,7 +102,8 @@ export function automaticGISData(source,catalog,app,now=new Date().toISOString()
  // Retain reviewed general locations. Recognize only explicit facility names;
  // legacy coded plots without a GIS match remain historical, never guessed.
  g.general_locations||={};
- for(const l of localBlocks(data,app))if(!g.mappings[l.id]&&Number(l.area||0)===0&&/^(?:ph(?:\s|$)|packing(?:\s|$)|nurser[yi]$|barak(?:\s|$)|jalan kebun$|kantor$|gudang$|workshop$|pos security$|all area(?:\s|$)|semua area$)/i.test(l.name))g.general_locations[l.id]=true;
+ if(app==='payrol'&&nurseryPadiMissing(rows,divisions)){const padi=divisions.find(d=>norm(d.nama_divisi)==='padi'),id=rows.reduce((m,r)=>Math.max(m,Number(r.id)||0),0)+1;rows.push({id,kode_blok:'Nursery Padi',nama_blok:'Nursery Padi',division_id:padi.id,komoditas:'Padi',status:'Aktif',luas:0});g.general_locations[id]=true;}
+ for(const l of localBlocks(data,app))if(!g.mappings[l.id]&&Number(l.area||0)===0&&/^(?:ph(?:\s|$)|packing(?:\s|$)|nurser[yi](?:\s+(?:padi|pisang))?$|barak(?:\s|$)|jalan kebun$|kantor$|gudang$|workshop$|pos security$|all area(?:\s|$)|semua area$)/i.test(l.name))g.general_locations[l.id]=true;
  g.authoritative=true;
  // Reuse only unambiguous existing names first, preserving numeric identities.
  const first=applyGISPlan(data,catalog,app,{allowDateConflicts:true,now});
